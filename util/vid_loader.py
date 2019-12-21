@@ -9,19 +9,20 @@ import json
 import cv2
 from PIL import Image
 import numpy as np
-#import dlib
+import dlib
 import torch
 
 from tqdm import tqdm
 import skvideo.io
 import skvideo.datasets
-from facenet_pytorch import MTCNN, InceptionResnetV1
+#from facenet_pytorch import MTCNN, InceptionResnetV1
 import matplotlib.pylab as plt
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 print(f'Running on device: {device}')
 
 INPATH = '/Users/dhanley2/Documents/Personal/dfake/data'
+INPATH = '/home/darragh/dfake/data'
 
 TRNSAMPFILES = glob.glob(os.path.join(INPATH, 'train_sample_videos/*'))
 TSTFILES = glob.glob(os.path.join(INPATH, 'test_videos/*'))
@@ -57,6 +58,18 @@ def face_detection(img):
     cv_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     return cv_rgb
 
+bbox = faces[0]
+def ixbbox(bbox):
+    t,b = bbox.top(),bbox.bottom()
+    l,r = bbox.left(),bbox.right()
+    return slice(t,b), slice(l,r)
+
+def ixpadbbox(bbox, h, w, pad = 40):
+    t,b = max(0, bbox.top()-pad), min(bbox.bottom()+pad, h)
+    l,r = max(0, bbox.left()-pad), min(bbox.right()+pad, w)
+    return slice(t,b), slice(l,r)
+
+
 vmeta = skvideo.io.ffprobe(TRNSAMPFILES[0])
 
 # '@codec_name', '@duration', '@coded_width', '@coded_height', '@nb_frames']
@@ -67,8 +80,27 @@ frate = int(metavid['@nb_frames'])/int(float(metavid['@duration']))
 %time v_len = int(v_cap.get(cv2.CAP_PROP_FRAME_COUNT))
 %time imgscv = [cviter(v) for v in TRNSAMPFILES[:10]] # 38.1s
 %time imgssk = [skiter(v) for v in TRNSAMPFILES[:10]] # 44.6s
-%time imgscv = [cviter(v) for v in TRNSAMPFILES[:1]] # 4.02 s
+%time imgscv = [cviter(v) for v in TRNSAMPFILES[:2]] # 4.02 s
 %time imgssk = [skiter(v) for v in TRNSAMPFILES[:1]] # 8.18 s
+
+[i for i in  dir(dlib) if 'fac' in i]
+
+image = imgscv[1][0]
+face_detector = dlib.get_frontal_face_detector()
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+%time faces = face_detector(gray, 1)
+%time faces = face_detector(gray, 1)
+%time faces = face_detector(gray[ixpadbbox(f, *gray.shape[:2], pad = 60 )], 1)
+
+print(len(faces))
+face_images = [image[f.top():f.bottom(), f.left():f.right()] for f in faces]
+face_images = [image[ixbbox(f)] for f in faces]
+face_images = [image[ixpadbbox(f, *gray.shape[:2], pad = 60 )] for f in faces]
+
+
+Image.fromarray(image)
+Image.fromarray(face_images[0])
+
 
 
 glob.glob(os.path.join(cv2.__path__[0], 'data/*frontalfac*'))

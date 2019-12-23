@@ -58,7 +58,7 @@ def face_detection(img):
     cv_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     return cv_rgb
 
-bbox = faces[0]
+#bbox = faces[0]
 def ixbbox(bbox):
     t,b = bbox.top(),bbox.bottom()
     l,r = bbox.left(),bbox.right()
@@ -69,24 +69,63 @@ def ixpadbbox(bbox, h, w, pad = 40):
     l,r = max(0, bbox.left()-pad), min(bbox.right()+pad, w)
     return slice(t,b), slice(l,r)
 
-
-vmeta = skvideo.io.ffprobe(TRNSAMPFILES[0])
-
+'''
 # '@codec_name', '@duration', '@coded_width', '@coded_height', '@nb_frames']
+vmeta = skvideo.io.ffprobe(TRNSAMPFILES[0])
 metavid, metaaud = vmeta["video"], vmeta["audio"]
 frate = int(metavid['@nb_frames'])/int(float(metavid['@duration']))
+'''
+def vid2imgls(fname, FPS=8):
+    imgs = []
+    v_cap = cv2.VideoCapture(TRNSAMPFILES[0])
+    vnframes, vh, vw, vfps = int(v_cap.get(cv2.CAP_PROP_FRAME_COUNT)), int(v_cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), \
+            int(v_cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(round(v_cap.get(cv2.CAP_PROP_FPS)))
+    vcap = cv2.VideoCapture(fname)
+    for t in range(vnframes):
+        ret = vcap.grab()
+        if t % int(round(vfps/FPS)) == 0:
+            ret, frame = vcap.retrieve()
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            imgs.append(frame)
+    vcap.release()
+    return imgs
 
-%time v_cap = cv2.VideoCapture(TRNSAMPFILES[0])
-%time v_len = int(v_cap.get(cv2.CAP_PROP_FRAME_COUNT))
-%time imgscv = [cviter(v) for v in TRNSAMPFILES[:10]] # 38.1s
-%time imgssk = [skiter(v) for v in TRNSAMPFILES[:10]] # 44.6s
+
+face_detector = dlib.get_frontal_face_detector()
+def face_bbox(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)   
+    faces = face_detector(gray, 1)
+    faces = [{'t' : f.top(), 
+              'b' : f.bottom(), 
+              'l': f.left(), 
+              'r': f.right()} for f in faces]
+    return faces
+
+frbbox = face_bbox(image)
+frbbox[0].get('t')
+
+
+%time imgls1 = vid2imgls(TRNSAMPFILES[0], FPS=8)
+%time imgls2 = vid2imgls(TRNSAMPFILES[0], FPS=30)
+
+image = imgls1[0]
+Image.fromarray(image)
+gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+%time faces = face_detector(gray, 1)
+
+dir(faces[0])
+faces[0].dcenter()
+
+
+[i for i in dir(cv2) if 'CAP_PROP' in i]
+#%time imgscv = [cviter(v) for v in TRNSAMPFILES[:10]] # 38.1s
+#%time imgssk = [skiter(v) for v in TRNSAMPFILES[:10]] # 44.6s
 %time imgscv = [cviter(v) for v in TRNSAMPFILES[:2]] # 4.02 s
 %time imgssk = [skiter(v) for v in TRNSAMPFILES[:1]] # 8.18 s
 
 [i for i in  dir(dlib) if 'fac' in i]
 
 image = imgscv[1][0]
-face_detector = dlib.get_frontal_face_detector()
 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 %time faces = face_detector(gray, 1)
 %time faces = face_detector(gray, 1)

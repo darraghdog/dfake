@@ -52,10 +52,10 @@ parser.add_option('-i', '--size', action="store", dest="size", help="image size"
 options, args = parser.parse_args()
 INPATH = options.rootpath
 
-sys.path.append(INPATH)
-from utils.sort import *
-from utils.logs import get_logger
-from utils.utils import dumpobj, loadobj
+sys.path.append(os.path.join(INPATH, 'utils' ))
+from logs import get_logger
+from utils import dumpobj, loadobj
+from sort import *
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -82,6 +82,9 @@ face_detector = dlib.cnn_face_detection_model_v1(FACEWEIGHTS)
 OUTDIR = os.path.join(INPATH, options.imgpath)
 FPS = int(options.fps)
 
+logger.info(TRNFILES[:5])
+
+
 def vid2imgls(fname, FPS=8):
     imgs = []
     v_cap = cv2.VideoCapture(fname)
@@ -98,6 +101,7 @@ def vid2imgls(fname, FPS=8):
     return imgs
 
 def face_bbox(image, fn = face_detector, RESIZE_MAXDIM = 500 ):
+    warnings.filterwarnings("ignore")
     try:
         ih, iw = image.shape[:2]
         RESIZE_RATIO = RESIZE_MAXDIM / max(ih, iw)

@@ -38,9 +38,6 @@ device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 print(f'Running on device: {device}')
 
 # Print info about environments
-logger = get_logger('VIDEO SETUP', 'INFO') 
-
-# Print info about environments
 parser = optparse.OptionParser()
 parser.add_option('-a', '--seed', action="store", dest="seed", help="model seed", default="1234")
 parser.add_option('-b', '--fold', action="store", dest="fold", help="Fold for split", default="0")
@@ -60,6 +57,8 @@ from utils.sort import *
 from utils.logs import get_logger
 from utils.utils import dumpobj, loadobj
 
+# Print info about environments
+logger = get_logger('Video to image :', 'INFO') 
 logger.info('Cuda set up : time {}'.format(datetime.datetime.now().time()))
 
 device=torch.device('cuda')

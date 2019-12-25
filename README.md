@@ -1,2 +1,1 @@
-# dfake
-Deepfake Detection Challenge
+## Deepfake Detection Challenge

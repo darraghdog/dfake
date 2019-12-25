@@ -47,20 +47,36 @@ FACEWEIGHTS = os.path.join(INPATH, 'weights/mmod_human_face_detector.dat')
 face_detector = dlib.get_frontal_face_detector()
 face_detector = dlib.cnn_face_detection_model_v1(FACEWEIGHTS)
 
-def vid2imgls(fname, FPS=8):
+def vid1imgls(fname, FPS=8):
     imgs = []
-    v_cap = cv2.VideoCapture(fname)
-    vnframes, vh, vw, vfps = int(v_cap.get(cv2.CAP_PROP_FRAME_COUNT)), int(v_cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), \
-            int(v_cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(round(v_cap.get(cv2.CAP_PROP_FPS)))
     vcap = cv2.VideoCapture(fname)
+    vnframes, vh, vw, vfps = \
+                int(vcap.get(cv2.CAP_PROP_FRAME_COUNT)), \
+                int(vcap.get(cv2.CAP_PROP_FRAME_HEIGHT)), \
+                int(vcap.get(cv2.CAP_PROP_FRAME_WIDTH)), \
+                int(round(vcap.get(cv2.CAP_PROP_FPS)))
     for t in range(vnframes):
         ret = vcap.grab()
         if t % int(round(vfps/FPS)) == 0:
             ret, frame = vcap.retrieve()
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             imgs.append(frame)
     vcap.release()
     return imgs
+
+# Get anchor frames for boxes
+VNAMES = glob.glob(os.path.join(INPATH, 'data/train_sample_videos/*'))
+FPS = 8
+%time imgls1 = [vid1imgls(f, FPS) for f in tqdm(VNAMES[:10])]
+
+from multiprocessing import Pool
+from multiprocessing import cpu_count
+def poolload():
+    pool = Pool(processes=4)
+    imgls2 = pool.map(vid1imgls, tqdm(VNAMES[:10]))
+    pool.close()
+    pool.join()
+    return imgls2
+%time imgls2 = poolload()
 
 def face_bbox(image, fn = face_detector, RESIZE_MAXDIM = 500 ):
     ih, iw = image.shape[:2]
@@ -96,23 +112,15 @@ def sortbbox(faces, thresh = 3, max_age = 1):
 
 
 # Get anchor frames for boxes
-
-VNAME='abofeumbvv.mp4' # BAD, SLOW --- BAD, detections
-VNAME='acxwigylke.mp4' # BAD - Audio problem; FACES - GOOD
-VNAME='aipfdnwpoo.mp4' # NOT GOOD
-VNAME='dsdoseflas.mp4'
-VNAME='atvmxvwyns.mp4'
 VNAMES = os.listdir(os.path.join(INPATH, 'data/train_sample_videos'))
 logls = []
-
-
-for VNAME in VNAMES:
+for VNAME in VNAMES[:50]:
     START = datetime.datetime.now()
     try:
         FPS = 8
         ANCHORFRAMES = FPS//2
         logger.info('Process {}'.format(VNAME))
-        imgls1 = vid2imgls(os.path.join(INPATH, 'data/train_sample_videos/{}'.format(VNAME)), FPS)
+        %time imgls1 = vid2imgls(os.path.join(INPATH, 'data/train_sample_videos/{}'.format(VNAME)), FPS)
         faces = [face_bbox(i) for t, i in enumerate(imgls1) if t % ANCHORFRAMES ==0 ]
         trackmat = sortbbox(faces, thresh = 2)
         logger.info('Tracker length (1st try) {}'.format(len(trackmat)))
@@ -126,26 +134,38 @@ for VNAME in VNAMES:
         logger.info('Face ct : {}; Track ct : {}'.format(sum(len(l) for l in faces), len(trackmat)))
         # Image.fromarray(imgls1[0])
         
-        trackfull = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls1) ))), \
+        trackvid = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls1) ))), \
                      columns=['obj', 'frame'])
-        trackfull = trackfull.merge(trackmat, how = 'left')
+        trackvid = trackvid.merge(trackmat, how = 'left')
         
-        trackfull = pd.concat([trackfull.query('obj==@o')\
+        trackvid = pd.concat([trackvid.query('obj==@o')\
                                .interpolate(method='piecewise_polynomial').dropna() \
-             for o in trackfull['obj'].unique()], 0) \
+             for o in trackvid['obj'].unique()], 0) \
                 .astype(np.int).sort_values(['frame', 'obj'], 0) \
                 .reset_index(drop=True)
-        trackfull.obj = trackfull.obj.astype('category').cat.codes
+        trackvid.obj = trackvid.obj.astype('category').cat.codes
+        trackvid['video']=VNAME
+        END = datetime.datetime.now()
+        STATUS = 'sucess'
+    except:
+        END = datetime.datetime.now()
+        STATUS = 'fail'
+    DURATION = int((END-START).total_seconds())
+    logls.append([VNAME, DURATION, STATUS])
+    
+    
+    pd.DataFrame(logls, columns = ['video', 'duration', 'status']) \
+        .to_csv(os.path.join(INPATH, 'check/train_sample_check/log.txt'), index = False)
         
         # Visualise it all
         H, W, _ = imgls1[0].shape
-        NOBJ = 1+trackfull.obj.max()
-        MAXOBJ = trackfull.obj.value_counts().max()
+        NOBJ = 1+trackvid.obj.max()
+        MAXOBJ = trackvid.obj.value_counts().max()
         # Pad the boundary box
-        trackfull['w'] = trackfull.x2 - trackfull.x1
-        trackfull['h'] = trackfull.y2 - trackfull.y1
-        trackfull['maxw'] = trackfull.groupby(['obj'])['w'].transform(max)
-        trackfull['maxh'] = trackfull.groupby(['obj'])['h'].transform(max)
+        trackvid['w'] = trackvid.x2 - trackvid.x1
+        trackvid['h'] = trackvid.y2 - trackvid.y1
+        trackvid['maxw'] = trackvid.groupby(['obj'])['w'].transform(max)
+        trackvid['maxh'] = trackvid.groupby(['obj'])['h'].transform(max)
         
         imgdict = dict((o, []) for o in range(NOBJ)) 
         for (t, row) in trackfull.iterrows():
@@ -162,13 +182,4 @@ for VNAME in VNAMES:
         FOUT = os.path.join(INPATH, 'check/train_sample_check/{}'.format(VNAME.replace('mp4', 'jpg')))
         logger.info('Write image out')
         Image.fromarray(imgall).save(FOUT)
-        END = datetime.datetime.now()
-        STATUS = 'sucess'
-    except:
-        END = datetime.datetime.now()
-        STATUS = 'fail'
-    DURATION = int((END-START).total_seconds())
-    logls.append([VNAME, DURATION, STATUS])
-    pd.DataFrame(logls, columns = ['video', 'duration', 'status']) \
-        .to_csv(os.path.join(INPATH, 'check/train_sample_check/log.txt'), index = False)
         

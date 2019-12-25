@@ -21,7 +21,7 @@ import torch
 from itertools import product
 from time import time
 import datetime
-
+from align import AlignDlib
 from tqdm import tqdm
 import skvideo.io
 import skvideo.datasets
@@ -96,79 +96,79 @@ def sortbbox(faces, thresh = 3, max_age = 1):
 
 
 # Get anchor frames for boxes
-
-VNAME='abofeumbvv.mp4' # BAD, SLOW --- BAD, detections
-VNAME='acxwigylke.mp4' # BAD - Audio problem; FACES - GOOD
-VNAME='aipfdnwpoo.mp4' # NOT GOOD
-VNAME='dsdoseflas.mp4'
-VNAME='atvmxvwyns.mp4'
-VNAMES = os.listdir(os.path.join(INPATH, 'data/train_sample_videos'))
+VNAMES = os.listdir(os.path.join(INPATH, 'data/train_sample_videos'))[:3]
+VNAME = VNAMES[0]
 logls = []
+FPS = 8
+ANCHORFRAMES = FPS//2
+logger.info('Process {}'.format(VNAME))
+imgls1 = vid2imgls(os.path.join(INPATH, 'data/train_sample_videos/{}'.format(VNAME)), FPS)
+faces = [face_bbox(i) for t, i in tqdm(enumerate(imgls1)) if t % ANCHORFRAMES ==0 ]
+
+l=list(map(int, faces[0][0]))
+Image.fromarray(imgls1[0])
+fimg = imgls1[0][l[1]:l[3],l[0]:l[2]]
+Image.fromarray(fimg)
+
+nn4_small2_pretrained = create_model()
+nn4_small2_pretrained.load_weights('weights/nn4.small2.v1.h5')    
+align_image(fimg)
 
 
-for VNAME in VNAMES:
-    START = datetime.datetime.now()
-    try:
-        FPS = 8
-        ANCHORFRAMES = FPS//2
-        logger.info('Process {}'.format(VNAME))
-        imgls1 = vid2imgls(os.path.join(INPATH, 'data/train_sample_videos/{}'.format(VNAME)), FPS)
+for i, m in enumerate(metadata):
+    img = load_image(m.image_path())
+    img = align_image(img)
+    # scale RGB values to interval [0,1]
+    img = (img / 255.).astype(np.float32)
+    # obtain embedding vector for image
+    embedded[i] = nn4_small2_pretrained.predict(np.expand_dims(img, axis=0))[0]
+
+
+trackmat = sortbbox(faces, thresh = 2)
+logger.info('Tracker length (1st try) {}'.format(len(trackmat)))
+
+if len(trackmat)<len(faces)//2 and len(faces)>8:
+    if int((datetime.datetime.now()-START).total_seconds())<360:
+        logger.info('Tracker length - 2nd try needed')
+        ANCHORFRAMES //= 2
         faces = [face_bbox(i) for t, i in enumerate(imgls1) if t % ANCHORFRAMES ==0 ]
         trackmat = sortbbox(faces, thresh = 2)
-        logger.info('Tracker length (1st try) {}'.format(len(trackmat)))
-        
-        if len(trackmat)<len(faces)//2 and len(faces)>8:
-            if int((datetime.datetime.now()-START).total_seconds())<360:
-                logger.info('Tracker length - 2nd try needed')
-                ANCHORFRAMES //= 2
-                faces = [face_bbox(i) for t, i in enumerate(imgls1) if t % ANCHORFRAMES ==0 ]
-                trackmat = sortbbox(faces, thresh = 2)
-        logger.info('Face ct : {}; Track ct : {}'.format(sum(len(l) for l in faces), len(trackmat)))
-        # Image.fromarray(imgls1[0])
-        
-        trackfull = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls1) ))), \
-                     columns=['obj', 'frame'])
-        trackfull = trackfull.merge(trackmat, how = 'left')
-        
-        trackfull = pd.concat([trackfull.query('obj==@o')\
-                               .interpolate(method='piecewise_polynomial').dropna() \
-             for o in trackfull['obj'].unique()], 0) \
-                .astype(np.int).sort_values(['frame', 'obj'], 0) \
-                .reset_index(drop=True)
-        trackfull.obj = trackfull.obj.astype('category').cat.codes
-        
-        # Visualise it all
-        H, W, _ = imgls1[0].shape
-        NOBJ = 1+trackfull.obj.max()
-        MAXOBJ = trackfull.obj.value_counts().max()
-        # Pad the boundary box
-        trackfull['w'] = trackfull.x2 - trackfull.x1
-        trackfull['h'] = trackfull.y2 - trackfull.y1
-        trackfull['maxw'] = trackfull.groupby(['obj'])['w'].transform(max)
-        trackfull['maxh'] = trackfull.groupby(['obj'])['h'].transform(max)
-        
-        imgdict = dict((o, []) for o in range(NOBJ)) 
-        for (t, row) in trackfull.iterrows():
-            obj = row.obj
-            frame = imgls1[row.frame]
-            imgdict[obj].append(frame[row.y1:row.y1+row.maxh, row.x1:row.x1+row.maxw])
-        
-        imgdict = dict((k, np.vstack(v)) for k, v in imgdict.items())
-        imgdim0 = max([i.shape[0] for i in imgdict.values()])
-        imgdict = dict((k, np.vstack((v, \
-                        np.zeros((imgdim0 - v.shape[0], v.shape[1], 3),dtype=np.uint8 ) )) ) \
-                       for k, v in imgdict.items())
-        imgall = np.hstack(list(imgdict.values()))
-        FOUT = os.path.join(INPATH, 'check/train_sample_check/{}'.format(VNAME.replace('mp4', 'jpg')))
-        logger.info('Write image out')
-        Image.fromarray(imgall).save(FOUT)
-        END = datetime.datetime.now()
-        STATUS = 'sucess'
-    except:
-        END = datetime.datetime.now()
-        STATUS = 'fail'
-    DURATION = int((END-START).total_seconds())
-    logls.append([VNAME, DURATION, STATUS])
-    pd.DataFrame(logls, columns = ['video', 'duration', 'status']) \
-        .to_csv(os.path.join(INPATH, 'check/train_sample_check/log.txt'), index = False)
-        
+logger.info('Face ct : {}; Track ct : {}'.format(sum(len(l) for l in faces), len(trackmat)))
+# Image.fromarray(imgls1[0])
+
+trackfull = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls1) ))), \
+             columns=['obj', 'frame'])
+trackfull = trackfull.merge(trackmat, how = 'left')
+
+trackfull = pd.concat([trackfull.query('obj==@o')\
+                       .interpolate(method='piecewise_polynomial').dropna() \
+     for o in trackfull['obj'].unique()], 0) \
+        .astype(np.int).sort_values(['frame', 'obj'], 0) \
+        .reset_index(drop=True)
+trackfull.obj = trackfull.obj.astype('category').cat.codes
+
+# Visualise it all
+H, W, _ = imgls1[0].shape
+NOBJ = 1+trackfull.obj.max()
+MAXOBJ = trackfull.obj.value_counts().max()
+# Pad the boundary box
+trackfull['w'] = trackfull.x2 - trackfull.x1
+trackfull['h'] = trackfull.y2 - trackfull.y1
+trackfull['maxw'] = trackfull.groupby(['obj'])['w'].transform(max)
+trackfull['maxh'] = trackfull.groupby(['obj'])['h'].transform(max)
+
+imgdict = dict((o, []) for o in range(NOBJ)) 
+for (t, row) in trackfull.iterrows():
+    obj = row.obj
+    frame = imgls1[row.frame]
+    imgdict[obj].append(frame[row.y1:row.y1+row.maxh, row.x1:row.x1+row.maxw])
+
+imgdict = dict((k, np.vstack(v)) for k, v in imgdict.items())
+imgdim0 = max([i.shape[0] for i in imgdict.values()])
+imgdict = dict((k, np.vstack((v, \
+                np.zeros((imgdim0 - v.shape[0], v.shape[1], 3),dtype=np.uint8 ) )) ) \
+               for k, v in imgdict.items())
+imgall = np.hstack(list(imgdict.values()))
+FOUT = os.path.join(INPATH, 'check/train_sample_check/{}'.format(VNAME.replace('mp4', 'jpg')))
+logger.info('Write image out')
+Image.fromarray(imgall)

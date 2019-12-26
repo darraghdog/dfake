@@ -84,14 +84,14 @@ face_detector = dlib.cnn_face_detection_model_v1(FACEWEIGHTS)
 OUTDIR = os.path.join(INPATH, options.imgpath)
 FPS = int(options.fps)
 
-METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
+# METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
-metadf['video_path'] = os.path.join(INPATH, options.vidpath) + '/' + metadf['video']
+metadf['video_path'] = os.path.join(INPATH, options.vidpath) + '/' + metadf['folder'] + '/' + metadf['video']
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
 
 metadf = metadf.query('fold == @FOLD')
 logger.info('Fold {} video file shape {} {}'.format(FOLD, *metadf.shape))
-pa = metadf.video_path.tolist()
+VIDFILES = metadf.video_path.tolist()
 
 
 def vid2imgls(fname, FPS=8):
@@ -160,6 +160,7 @@ for tt, VNAME in enumerate(VIDFILES):
     START = datetime.datetime.now()
     try:
         logger.info('Process image {} : {}'.format(tt, VNAME.split('/')[-1]))
+        logger.info(VNAME)
         imgls = vid2imgls(VNAME, FPS)
         H, W, _ = imgls[0].shape
         probebbox, MAXDIM = [], 500.0
@@ -211,8 +212,8 @@ for tt, VNAME in enumerate(VIDFILES):
 logdf = pd.DataFrame(logls, columns = ['video', 'objectct', 'framect', 'duration', 'status'])
 trackdf = pd.concat(trackls, 0)
 trackdf['video'] = trackdf['video'].apply(lambda x: x.split('/')[-1])
-logdf.to_csv(os.path.join(OUTDIR, 'log.txt'), index = False)
-trackdf.to_csv(os.path.join(OUTDIR, 'tracker.txt'), index = False)
+logdf.to_csv(os.path.join(OUTDIR, 'log_fold{}.txt'.format(FOLD)), index = False)
+trackdf.to_csv(os.path.join(OUTDIR, 'tracker_fold{}.txt'.format(FOLD)), index = False)
 
 
         

@@ -153,14 +153,14 @@ for tt, VNAME in enumerate(TRNFILES[:1000]):
         logger.info('Process image {} : {}'.format(tt, VNAME.split('/')[-1]))
         imgls = vid2imgls(VNAME, FPS)
         H, W, _ = imgls[0].shape
-        probebbox, MAXDIM = [], 500.0
+        probebbox, MAXDIM = [], 600.0
         probels = random.sample(imgls, k = 2)
         while (len(probebbox)==0) and MAXDIM < max(H,W):
             probebbox = list(itertools.chain(*[face_bbox(p, RESIZE_MAXDIM = MAXDIM) for p in probels]))
             if len(probebbox)==0 : MAXDIM *= 1.3
         if len(probebbox)==0:
             raise Exception('Cannot find faces')
-        trackmat, faces = gettrack(imgls, FPS//2, MAXDIM)
+        trackmat, faces = gettrack(imgls, FPS//4, MAXDIM)
         if len(trackmat)<4:
             trackmat, faces = gettrack(imgls, FPS//4, min(max(H,W),1000)) 
         trackvid = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls) ))), \

@@ -48,6 +48,7 @@ parser.add_option('-f', '--wtspath', action="store", dest="wtspath", help="root 
 parser.add_option('-g', '--fps', action="store", dest="fps", help="Frames per second", default="8")
 parser.add_option('-i', '--size', action="store", dest="size", help="image size", default="224")
 parser.add_option('-j', '--metafile', action="store", dest="metafile", help="Meta file", default="trainmeta.csv.gz")
+parser.add_option('-k', '--startsize', action="store", dest="startsize", help="Starting video resize dim", default="640")
 
 
 options, args = parser.parse_args()
@@ -83,6 +84,7 @@ FACEWEIGHTS = os.path.join(INPATH, WTSFILES, 'mmod_human_face_detector.dat')
 face_detector = dlib.cnn_face_detection_model_v1(FACEWEIGHTS)
 OUTDIR = os.path.join(INPATH, options.imgpath)
 FPS = int(options.fps)
+STARTSIZE = int(options.startsize)
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
@@ -160,10 +162,9 @@ for tt, VNAME in enumerate(VIDFILES):
     START = datetime.datetime.now()
     try:
         logger.info('Process image {} : {}'.format(tt, VNAME.split('/')[-1]))
-        logger.info(VNAME)
         imgls = vid2imgls(VNAME, FPS)
         H, W, _ = imgls[0].shape
-        probebbox, MAXDIM = [], 500.0
+        probebbox, MAXDIM = [], STARTSIZE
         probels = random.sample(imgls, k = 2)
         while (len(probebbox)==0) and MAXDIM < max(H,W):
             probebbox = list(itertools.chain(*[face_bbox(p, RESIZE_MAXDIM = MAXDIM) for p in probels]))

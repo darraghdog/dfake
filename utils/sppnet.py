@@ -6,12 +6,10 @@ import torch.nn.functional as F
 import os, math
 
 ''''
-m18 = models.resnet18(pretrained=True)
-m34 = models.resnet34(pretrained=True)
-m50 = models.resnet50(pretrained=True)
-
-for nm, mod in zip(['resnet18', 'resnet34', 'resnet50'], [m18, m34, m50]):
-    output_model_file = '{}/{}.pth'.format(dir_, nm)
+folder='/Users/dhanley2/Documents/Personal/dfake/weights'
+for bb in [18, 34, 50]:    
+    mod = ResNet(bb, num_class=2, pretrained=True, folder=folder)
+    output_model_file = '{}/resnet{}.pth'.format(folder, bb)
     torch.save(mod.state_dict(), output_model_file)
 '''
 class ResNet(nn.Module):

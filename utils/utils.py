@@ -5,9 +5,26 @@ import argparse
 import os
 import torch
 import tqdm
+import numpy as np
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch import nn
 
+
+def chunks(l, n):
+    for i in range(0, len(l), n):
+        yield l[i:i+n]
+
+def pilimg(frames, cols = 4):
+    rows = np.ceil(frames.shape[0] / cols)
+    dim = frames.shape[1]
+    img = np.zeros((int(rows*dim), int(cols*dim), 3), dtype= np.uint8)
+    for t, im in enumerate(chunks(frames, cols)):
+        xpos, ypos = dim*t, im.shape[1]*len(im)
+        im = np.concatenate(im, 1)
+        img[xpos:xpos+dim, :ypos] = im
+    return img
+    
 
 class GradualWarmupScheduler(_LRScheduler):
     """ Gradually warm-up(increasing) learning rate in optimizer.
@@ -263,3 +280,12 @@ def bn_update(loader, model):
         n += b
 
     model.apply(lambda module: _set_momenta(module, momenta))
+
+class SpatialDropout(nn.Dropout2d):
+    def forward(self, x):
+        x = x.unsqueeze(2)    # (N, T, 1, K)
+        x = x.permute(0, 3, 2, 1)  # (N, K, 1, T)
+        x = super(SpatialDropout, self).forward(x)  # (N, K, 1, T), some features are masked
+        x = x.permute(0, 3, 2, 1)  # (N, T, 1, K)
+        x = x.squeeze(2)  # (N, T, K)
+        return x

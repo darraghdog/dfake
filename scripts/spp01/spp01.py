@@ -103,7 +103,6 @@ LR=float(options.lr)
 LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 
-
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
@@ -150,7 +149,7 @@ def augment(aug, image):
     return aug(image=image)['image']  
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, aug_ratio = 5, labels = True, maxlen = 37):
+    def __init__(self, df, imgdir, aug_ratio = 5, train = True, labels = True, maxlen = 37):
         self.data = df.copy()
         logger.info('Full data shape {} {}'.format(*self.data.shape))
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
@@ -171,28 +170,29 @@ class DFakeDataset(Dataset):
         self.augbrcn = Compose([RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.7)])
         self.augnorm = Compose([ Normalize(mean=meanimg, std=stdimg, 
                             max_pixel_value=255.0, p=1.0), ToTensor()])
+        self.train = train
     
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, idx):
-
         vid = self.data.loc[idx]
-        logger.info('Index {}'.format(vid.to_dict()))
+        # logger.info('Index {}'.format(vid.to_dict()))
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
-        logger.info('Vid file {}'.format(fname))
+        # logger.info('Vid file {}'.format(fname))
 
         frames = np.load(fname)['arr_0']
         # Image.fromarray(frames[0])
         d0,d1,d2,d3 = frames.shape
-        logger.info('Vid shape {}'.format(frames.shape))
-        logger.info(15*'__')
+        # logger.info('Vid shape {}'.format(frames.shape))
+        # logger.info(15*'__')
 
         frames = frames.reshape(d0*d1, d2, d3)
         # Augment and normalise; renadom brightness on real images only for now
-        frames = augment(self.augflip, frames)
-        if vid.label==0: frames = augment(self.augbrcn, frames)
+        if self.train:
+            frames = augment(self.augflip, frames)
+            if vid.label==0: frames = augment(self.augbrcn, frames)
         frames = augment(self.augnorm, frames)
         frames = frames.reshape(d0,d1,d2,d3)
         # Cut the frames to max 37 with a sliding window
@@ -200,19 +200,16 @@ class DFakeDataset(Dataset):
             xtra = frames.shape[0]-self.maxlen
             shift = random.randint(0, xtra)
             frames = frames[xtra-shift:-shift]
-        logger.info('Frames shape {}'.format(frames.shape))
-
-        if self.labels:
+        # logger.info('Frames shape {}'.format(frames.shape))
+        if self.train:
             labels = torch.tensor(vid.label)
             return {'frames': frames, 'labels': labels}    
         else:      
             return {'frames': frames}
 
 def collatefn(batch):
-    
     seqlen = torch.tensor([l['frames'].shape[0] for l in batch])
-    maxlen = seqlen.max()
-    
+    maxlen = seqlen.max()    
     # get shapes
     d0,d1,d2,d3 = batch[0]['frames'].shape
         
@@ -231,8 +228,13 @@ def collatefn(batch):
 logger.info('Create loaders...')
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
 # BATCHSIZE=2
-trndataset = DFakeDataset(metadf, IMGDIR, labels=True)
+trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
+valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
+
+trndataset = DFakeDataset(trndf, IMGDIR, labels=True, train = True)
+valdataset = DFakeDataset(valdf, IMGDIR, labels=True, train = False)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=0, collate_fn=collatefn)
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE*4, shuffle=False, num_workers=0, collate_fn=collatefn)
 
 
 logger.info('Create model')
@@ -252,8 +254,6 @@ scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
 
-ypredls = []
-ypredtstls = []
 for epoch in range(EPOCHS):
     tr_loss = 0.
     for param in model.parameters():
@@ -276,35 +276,27 @@ for epoch in range(EPOCHS):
         if step%1000==0:
             logger.info('Trn step {} of {} trn lossavg {:.5f}'. \
                         format(step, len(trnloader), (tr_loss/(1+step))))
-    output_model_file = os.path.join(WORK_DIR, 'weights/lstm_gepoch{}_lstmepoch{}_fold{}.bin'.format(GLOBALEPOCH, epoch, fold))
+    output_model_file = 'weights/sppnet_fold{}.bin'.format(epoch, fold)
     torch.save(model.state_dict(), output_model_file)
 
     scheduler.step()
     model.eval()
-    '''
-    logger.info('Prep val score...')
-    ypred, imgval = predict(valloader)
-    ypredls.append(ypred)
-     
-    yvalpred = sum(ypredls[-nbags:])/len(ypredls[-nbags:])
-    yvalout = makeSub(yvalpred, imgval)
-    yvalp = makeSub(ypred, imgval)
-    
-    # get Val score
-    weights = ([1, 1, 1, 1, 1, 2] * ypred.shape[0])
-    yact = valloader.dataset.data[label_cols].values#.flatten()
-    yact = makeSub(yact, valloader.dataset.data['Image'].tolist())
-    yact = yact.set_index('ID').loc[yvalout.ID].reset_index()
-    valloss = log_loss(yact['Label'].values, yvalp['Label'].values.clip(.00001,.99999) , sample_weight = weights)
-    vallossavg = log_loss(yact['Label'].values, yvalout['Label'].values.clip(.00001,.99999) , sample_weight = weights)
-    logger.info('Epoch {} val logloss {:.5f} bagged {:.5f}'.format(epoch, valloss, vallossavg))
-    '''
-    logger.info('Prep test sub...')
-    ypred, imgtst = predict(tstloader)
-    ypredtstls.append(ypred)
+    ypredval = []
+    for step, batch in enumerate(valloader):
+        x = batch['frames'].to(device, dtype=torch.float)
+        x = torch.autograd.Variable(x, requires_grad=True)
+        out = model(x)
+        ypredval.append(out.cpu().detach().numpy())
+        if step%1000==0:
+            logger.info('Val step {} of {}'.format(step, len(valloader)))    
+    ypredval = np.concatenate(ypredval).flatten()
+    yactval = valdataset.data.label.values
+    valloss = log_loss(yactval, ypredval.clip(.00001,.99999))
+    logger.info('Epoch {} val logloss {:.5f}'.format(epoch, valloss))
     
 logger.info('Write out bagged prediction to preds folder')
-ytstpred = sum(ypredtstls[-nbags:])/len(ypredtstls[-nbags:])
-ytstout = makeSub(ytstpred, imgtst)
-ytstout.to_csv('preds/lstm{}{}{}_{}_epoch{}_sub_{}.csv.gz'.format(TTAHFLIP, TTATRANSPOSE, LSTM_UNITS, WORK_DIR.split('/')[-1], epoch, embnm), \
+yvaldf = valdataset.data[['video', 'label']]
+yvaldf['pred'] = ypredval 
+yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}.csv.gz'.format(epoch), \
             index = False, compression = 'gzip')
+

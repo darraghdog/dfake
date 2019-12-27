@@ -97,6 +97,7 @@ FOLD = int(options.fold)
 BATCHSIZE = int(options.batchsize)
 METAFILE = os.path.join(INPATH, 'data', options.metafile)
 WTSFILES = os.path.join(INPATH, options.wtspath)
+WTSPATH = os.path.join(INPATH, options.wtspath)
 IMGDIR = os.path.join(INPATH, options.imgpath)
 EPOCHS = int(options.epochs)
 LR=float(options.lr)
@@ -109,11 +110,11 @@ logger.info('Full video file shape {} {}'.format(*metadf.shape))
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
-    def __init__(self, backbone=34, pool_size=(1, 2, 6), pretrained=True, \
-                 dense_units = 256, dropout = 0.2, embed_size =  embedsize):
+    def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
+                 dense_units = 256, dropout = 0.2):
         # Only resnet is supported in this version
         super(SPPSeqNet, self).__init__()
-        self.sppnet = SPPNet(backbone=34, pool_size=pool_size)
+        self.sppnet = SPPNet(backbone=34, pool_size=pool_size, folder=WTSPATH)
         self.dense_units = dense_units
         self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)

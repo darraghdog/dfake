@@ -5,6 +5,7 @@ from torchvision import models
 import torch.nn.functional as F
 import os, math
 
+''''
 m18 = models.resnet18(pretrained=True)
 m34 = models.resnet34(pretrained=True)
 m50 = models.resnet50(pretrained=True)
@@ -12,25 +13,16 @@ m50 = models.resnet50(pretrained=True)
 for nm, mod in zip(['resnet18', 'resnet34', 'resnet50'], [m18, m34, m50]):
     output_model_file = '{}/{}.pth'.format(dir_, nm)
     torch.save(mod.state_dict(), output_model_file)
-
+'''
 class ResNet(nn.Module):
     def __init__(self, layers=18, num_class=2, pretrained=False, folder = None):
         super(ResNet, self).__init__()
         if layers == 18:
             self.resnet = models.resnet18(pretrained=pretrained)
-            if folder is not None:
-                torch.save(model.state_dict(), output_model_file)
-                model = torch.load(os.path.join(folder, 'resnet18.pth'))
         elif layers == 34:
             self.resnet = models.resnet34(pretrained=pretrained)
-            if folder is not None:
-                torch.save(model.state_dict(), output_model_file)
-                model = torch.load(os.path.join(folder, 'resnet34.pth'))
         elif layers == 50:
             self.resnet = models.resnet50(pretrained=pretrained)
-            if folder is not None:
-                torch.save(model.state_dict(), output_model_file)
-                model = torch.load(os.path.join(folder, 'resnet50.pth'))
         elif layers == 101:
             self.resnet = models.resnet101(pretrained=pretrained)
         elif layers == 152:
@@ -62,14 +54,15 @@ class ResNet(nn.Module):
         x = self.fc(x)
         return x
 
-
+# torch.load(os.path.join(folder, 'resnet{}.pth'.format(backbone)))
 
 class SPPNet(nn.Module):
-    def __init__(self, backbone=101, num_class=2, pool_size=(1, 2, 6), pretrained=True):
+    def __init__(self, folder, backbone=101, num_class=2, pool_size=(1, 2, 6), pretrained=False):
         # Only resnet is supported in this version
         super(SPPNet, self).__init__()
         if backbone in [18, 34, 50, 101, 152]:
-            self.resnet = ResNet(backbone, num_class, pretrained)
+            self.resnet = ResNet(backbone, num_class, pretrained, folder)
+            self.resnet.load_state_dict(torch.load(  os.path.join(folder, 'resnet{}.pth'.format(backbone))  ))
         else:
             raise ValueError('Resnet{} is not supported yet.'.format(backbone))
 

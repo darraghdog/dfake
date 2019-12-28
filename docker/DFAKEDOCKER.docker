@@ -1,0 +1,8 @@
+FROM nvcr.io/nvidia/pytorch:19.09-py3
+
+RUN pip install albumentations==0.4.3
+RUN pip install scikit-video
+RUN pip install dlib
+RUN pip install filterpy
+RUN conda install tensorflow==1.15
+RUN pip install mtcnn

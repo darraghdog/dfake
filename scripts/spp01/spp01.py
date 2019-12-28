@@ -159,10 +159,10 @@ class DFakeDataset(Dataset):
         self.labels = labels
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         logger.info('Fitered on frames on disk {} {}'.format(*self.data.shape))
-
         self.data = pd.concat([self.data.query('label == 0')]*5+\
                                [self.data.query('label == 1')])
         self.data = self.data.sample(frac=1).reset_index(drop=True)
+        # self.data = self.data[:500].copy()
         self.maxlen = maxlen
         logger.info('Expand the REAL class {} {}'.format(*self.data.shape))
         meanimg = [0.4258249 , 0.31385377, 0.29170314]
@@ -178,36 +178,34 @@ class DFakeDataset(Dataset):
     
     def __getitem__(self, idx):
         vid = self.data.loc[idx]
-        # logger.info('Index {}'.format(vid.to_dict()))
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
-        # logger.info('Vid file {}'.format(fname))
-
-        frames = np.load(fname)['arr_0']
-        # Image.fromarray(frames[0])
-        d0,d1,d2,d3 = frames.shape
-        # logger.info('Vid shape {}'.format(frames.shape))
-        # logger.info(15*'__')
-
-        frames = frames.reshape(d0*d1, d2, d3)
-        # Augment and normalise; renadom brightness on real images only for now
-        if self.train:
-            frames = augment(self.augflip, frames)
-            if vid.label==0: frames = augment(self.augbrcn, frames)
-        frames = augment(self.augnorm, frames)
-        frames = frames.reshape(d0,d1,d2,d3)
-        # Cut the frames to max 37 with a sliding window
-        if d0>self.maxlen:
-            xtra = frames.shape[0]-self.maxlen
-            shift = random.randint(0, xtra)
-            frames = frames[xtra-shift:-shift]
-        # logger.info('Frames shape {}'.format(frames.shape))
-        if self.train:
-            labels = torch.tensor(vid.label)
-            return {'frames': frames, 'labels': labels}    
-        else:      
-            return {'frames': frames}
-
+        try:
+            frames = np.load(fname)['arr_0']
+            d0,d1,d2,d3 = frames.shape
+            # logger.info('Vid shape {}'.format(frames.shape))
+            # logger.info(15*'__')
+            
+            frames = frames.reshape(d0*d1, d2, d3)
+            # Augment and normalise; renadom brightness on real images only for now
+            if self.train:
+                frames = augment(self.augflip, frames)
+                if vid.label==0: frames = augment(self.augbrcn, frames)
+            frames = augment(self.augnorm, frames)
+            frames = frames.reshape(d0,d1,d2,d3)
+            # Cut the frames to max 37 with a sliding window
+            if d0>self.maxlen:
+                xtra = frames.shape[0]-self.maxlen
+                shift = random.randint(0, xtra)
+                frames = frames[xtra-shift:-shift]
+            if self.train:
+                labels = torch.tensor(vid.label)
+                return {'frames': frames, 'labels': labels}    
+            else:      
+                return {'frames': frames}
+        except:
+            logger.info('Failed to load numpy array {}'.format(fname))
+               
 def collatefn(batch):
     seqlen = torch.tensor([l['frames'].shape[0] for l in batch])
     maxlen = seqlen.max()    
@@ -234,14 +232,14 @@ valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 trndataset = DFakeDataset(trndf, IMGDIR, labels=True, train = True)
 valdataset = DFakeDataset(valdf, IMGDIR, labels=True, train = False)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=0, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE*4, shuffle=False, num_workers=0, collate_fn=collatefn)
+trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=8, collate_fn=collatefn)
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=8, collate_fn=collatefn)
 
 
 logger.info('Create model')
 poolsize=(1, 2, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
-model = SPPSeqNet(backbone=34, pool_size=poolsize, dense_units = 256, \
+model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
                   dropout = 0.2, embed_size = embedsize)
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
@@ -274,22 +272,22 @@ for epoch in range(EPOCHS):
         with amp.scale_loss(loss, optimizer) as scaled_loss:
             scaled_loss.backward()
         optimizer.step()
-        if step%1000==0:
+        if step%100==0:
             logger.info('Trn step {} of {} trn lossavg {:.5f}'. \
                         format(step, len(trnloader), (tr_loss/(1+step))))
-    output_model_file = 'weights/sppnet_fold{}.bin'.format(epoch, fold)
+    output_model_file = 'weights/sppnet_fold{}.bin'.format(epoch, FOLD)
     torch.save(model.state_dict(), output_model_file)
 
     scheduler.step()
     model.eval()
     ypredval = []
-    for step, batch in enumerate(valloader):
-        x = batch['frames'].to(device, dtype=torch.float)
-        x = torch.autograd.Variable(x, requires_grad=True)
-        out = model(x)
-        ypredval.append(out.cpu().detach().numpy())
-        if step%1000==0:
-            logger.info('Val step {} of {}'.format(step, len(valloader)))    
+    with torch.no_grad():
+        for step, batch in enumerate(valloader):
+            x = batch['frames'].to(device, dtype=torch.float)
+            out = model(x)
+            ypredval.append(out.cpu().detach().numpy())
+            if step%200==0:
+                logger.info('Val step {} of {}'.format(step, len(valloader)))    
     ypredval = np.concatenate(ypredval).flatten()
     yactval = valdataset.data.label.values
     valloss = log_loss(yactval, ypredval.clip(.00001,.99999))

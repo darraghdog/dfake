@@ -17,7 +17,6 @@ import cv2
 from PIL import Image
 import numpy as np
 import pandas as pd
-import dlib
 import torch
 from itertools import product
 from time import time
@@ -29,10 +28,8 @@ import skvideo.datasets
 import random
 import optparse
 import itertools
-#from facenet_pytorch import MTCNN, InceptionResnetV1
 import matplotlib.pylab as plt
 import warnings
-from facenet_pytorch import MTCNN
 warnings.filterwarnings("ignore")
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -55,10 +52,13 @@ parser.add_option('-k', '--startsize', action="store", dest="startsize", help="S
 options, args = parser.parse_args()
 INPATH = options.rootpath
 
-sys.path.append(os.path.join(INPATH, 'utils' ))
-from logs import get_logger
-from utils import dumpobj, loadobj
-from sort import *
+sys.path.append(os.path.join(INPATH))
+from utils.sort import *
+from utils.logs import get_logger
+from utils.utils import dumpobj, loadobj
+from utils.utils import cfg_re50, cfg_mnet, decode_landm, decode, PriorBox
+from utils.utils import py_cpu_nms, load_fd_model, remove_prefix
+from utils.retinaface import RetinaFace
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -78,16 +78,13 @@ for (k,v) in options.__dict__.items():
 SEED = int(options.seed)
 SIZE = int(options.size)
 FOLD = int(options.fold)
-# TRNFILES = glob.glob(os.path.join(INPATH, options.vidpath, '*'))
 METAFILE = os.path.join(INPATH, 'data', options.metafile)
 WTSFILES = os.path.join(INPATH, options.wtspath)
-FACEWEIGHTS = os.path.join(INPATH, WTSFILES, 'mmod_human_face_detector.dat')
+# FACEWEIGHTS = os.path.join(INPATH, WTSFILES, 'mmod_human_face_detector.dat')
+# face_detector = dlib.cnn_face_detection_model_v1(FACEWEIGHTS)
 OUTDIR = os.path.join(INPATH, options.imgpath)
 FPS = int(options.fps)
 STARTSIZE = int(options.startsize)
-
-face_detector = dlib.cnn_face_detection_model_v1(FACEWEIGHTS)
-mtcnn = MTCNN()
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
@@ -98,6 +95,30 @@ metadf = metadf.query('fold == @FOLD')
 logger.info('Fold {} video file shape {} {}'.format(FOLD, *metadf.shape))
 VIDFILES = metadf.video_path.tolist()
 
+def bboxes(loc, conf, scale, cfg):
+    boxes = decode(loc.data, prior_data, cfg['variance'])
+    boxes = boxes * scale 
+    boxes = boxes.cpu().numpy()
+    scores = conf.data.cpu().numpy()[:, 1]
+    
+    # ignore low scores
+    inds = np.where(scores > cfg['confidence'])[0]
+    boxes = boxes[inds]
+    scores = scores[inds]
+    
+    # keep top-K before NMS
+    order = scores.argsort()[::-1]
+    boxes = boxes[order]
+    scores = scores[order]
+    
+    # do NMS
+    dets = np.hstack((boxes, scores[:, np.newaxis])).astype(np.float32, copy=False)
+    keep = py_cpu_nms(dets, cfg['nms_threshold'])
+    dets = dets[keep, :]
+    
+    # convert to boxes
+    dets = [d[:4].astype(np.int32).tolist() + [d[4]] for d in dets]
+    return dets
 
 def vid2imgls(fname, FPS=8):
     imgs = []
@@ -114,32 +135,21 @@ def vid2imgls(fname, FPS=8):
     vcap.release()
     return imgs
 
-def face_bbox(image, fn = face_detector, RESIZE_MAXDIM = 500, fdetector='dlib'):
-    warnings.filterwarnings("ignore")
-    try:
-        facesls = []
-        if fdetector== 'dlib':
-            ih, iw = image.shape[:2]
-            RESIZE_RATIO = RESIZE_MAXDIM / max(ih, iw)
-            RESIZE = tuple((int(RESIZE_RATIO * iw), int(RESIZE_RATIO * ih)))
-            HEIGHT_DOWNSIZE, WIDTH_DOWNSIZE = ih/RESIZE[1], iw/RESIZE[0] 
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)   
-            gray = cv2.resize(gray, RESIZE, interpolation=cv2.INTER_CUBIC)
-            faces = fn(gray, 1)
-            facesls += [[f.rect.left()*WIDTH_DOWNSIZE, 
-                      f.rect.top()*HEIGHT_DOWNSIZE, 
-                      f.rect.right()*WIDTH_DOWNSIZE,
-                      f.rect.bottom()*HEIGHT_DOWNSIZE,
-                      f.confidence] for f in faces]
-            return facesls
-        if fdetector== 'mtcnn':
-            img = Image.fromarray(image)
-            bboxes = detect_faces(img)
-            bboxes = np.round(bboxes).astype(np.int16).tolist()
-            return bboxes
-    except:
-        logger.info('Bad image returned')
-        return []
+def face_bbox(imgls, im_height, im_width):    
+    batch = np.float32(np.array([i for i in imgls]))
+    batch -= (104, 117, 123)
+    batch = torch.tensor(batch)
+    batch = batch.permute(0, 3, 1, 2)
+    scale = torch.Tensor([im_width, im_height]*2)
+    batch = batch.to(device)
+    scale = scale.to(device)
+    loc, conf, landms = net(batch)
+    priorbox = PriorBox(cfg, image_size=(im_height, im_width))
+    priors = priorbox.forward()
+    priors = priors.to(device)
+    prior_data = priors.data
+    dets = [bboxes(loc[i], conf[i], scale, cfg) for i in range(batch.shape[0])]
+    return dets
 
 # Make tracker for box areas
 def sortbbox(faces, anchorframes, thresh = 3, max_age = 1):
@@ -155,12 +165,26 @@ def sortbbox(faces, anchorframes, thresh = 3, max_age = 1):
     trackmat = trackmat[ trackmat.groupby('obj')['obj'].transform('count') >= thresh]
     return trackmat
 
-def gettrack(imgls, anchorframes, maxdim, fdetector='dlib'):
-    faces = [face_bbox(i, RESIZE_MAXDIM = maxdim, fdetector=fdetector) for t, i in enumerate(imgls) if t % anchorframes ==0 ]
+def gettrack(imgls, anchorframes, im_height, im_width):
+    imgls = [i for t, i in enumerate(imgls) if t % anchorframes ==0 ]
+    dets = face_bbox(imgls, im_height, im_width)
     trackmat = sortbbox(faces, anchorframes, thresh = 2)  
     logger.info('Detector dimension {} Anchor frames {} Tracker length {} Faces count {}'.format(maxdim, anchorframes, len(trackmat), len(list(itertools.chain(*faces)))))
     return trackmat, faces
 
+logger.info('Set up model')
+MODPATH = os.path.join(WTSFILES, 'retinaface/Resnet50_Final.pth')
+cfg = cfg_re50
+MNPATH = os.path.join(WTSFILES, 'retinaface/mobilenetV1X0.25_pretrain.tar')
+MODPATH = os.path.join(WTSFILES, 'retinaface/mobilenet0.25_Final.pth')
+cfg = cfg_mnet
+cfg['confidence'] = 0.95
+cfg['nms_threshold'] = 0.4
+
+net = RetinaFace(cfg, phase = 'test', mnpath = MNPATH)
+net = load_fd_model(net, MODPATH, True)
+net = net.to(device)
+net.eval()
 
 # Get anchor frames for boxes
 logls = []
@@ -172,25 +196,10 @@ for tt, VNAME in enumerate(VIDFILES):
         logger.info('Process image {} : {}'.format(tt, VNAME.split('/')[-1]))
         imgls = vid2imgls(VNAME, FPS)
         H, W, _ = imgls[0].shape
-        probebbox, MAXDIM = [], STARTSIZE
-        probels = random.sample(imgls, k = 2)
-        while (len(probebbox)==0) and MAXDIM < max(H,W):
-            probebbox = list(itertools.chain(*[face_bbox(p, RESIZE_MAXDIM = MAXDIM) for p in probels]))
-            if len(probebbox)==0 : MAXDIM *= 1.3
-        if len(probebbox)==0:
-            logger.info('Try mtcnn...')
-            trackmat, faces = gettrack(imgls, FPS//4, min(max(H,W),1000), fdetector='mtcnn') 
-            # raise Exception('Cannot find faces')
-        else:
-            trackmat, faces = gettrack(imgls, FPS//2, MAXDIM)
-            if len(trackmat)<4:
-                trackmat, faces = gettrack(imgls, FPS//4, min(max(H,W),1000)) 
-        if len(trackmat)==0:
-            raise Exception('Cannot find faces')
+        trackmat, faces = gettrack(imgls, FPS//2, H, W)
         trackvid = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls) ))), \
                      columns=['obj', 'frame'])
         trackvid = trackvid.merge(trackmat, how = 'left')
-        
         trackvid = pd.concat([trackvid.query('obj==@o')\
                                .interpolate(method='piecewise_polynomial').dropna() \
              for o in trackvid['obj'].unique()], 0) \
@@ -205,14 +214,12 @@ for tt, VNAME in enumerate(VIDFILES):
             frame = imgls[row.frame]
             face = frame[row.y1:row.y1+row.maxdim, row.x1:row.x1+row.maxdim]
             face = cv2.resize(face, (SIZE,SIZE), interpolation=cv2.INTER_CUBIC)
-            #face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB) 
             imgdict[obj].append(face)
         trackfaces = np.array(sum(list(imgdict.values()), []))
         trackvid = trackvid.sort_values(['obj', 'frame'], 0).reset_index(drop=True)
         N_OBJ, N_FACES = len(trackvid.obj.unique()), len(trackvid)
         trackls.append(trackvid)
         np.savez_compressed(os.path.join(OUTDIR, VNAME.split('/')[-1].replace('mp4', 'npz')), trackfaces)
-        # Image.fromarray(trackfaces[2])
         END = datetime.datetime.now()
         STATUS = 'sucess'
     except:

@@ -5,3 +5,4 @@ RUN pip install scikit-video
 RUN pip install dlib
 RUN pip install filterpy
 RUN pip install facenet-pytorch
+RUN pip install torch-mtcnn

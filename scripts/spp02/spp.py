@@ -68,6 +68,8 @@ parser.add_option('-n', '--decay', action="store", dest="decay", help="Weight De
 parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Scheduler Learning Rate Gamma", default="1.0")
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
+parser.add_option('-r', '--lrmult', action="store", dest="lrmult", help="learning rate multiplier", default="4")
+parser.add_option('-s', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
 
 
 options, args = parser.parse_args()
@@ -76,7 +78,7 @@ INPATH = options.rootpath
 #INPATH='/Users/dhanley2/Documents/Personal/dfake'
 sys.path.append(os.path.join(INPATH, 'utils' ))
 from logs import get_logger
-from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
+from utils import dumpobj, loadobj, GradualWarmupScheduler, chunks, pilimg, SpatialDropout
 from sort import *
 from sppnet import SPPNet
 
@@ -107,9 +109,8 @@ LR=float(options.lr)
 LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 INFER=options.infer
-
-
-
+ACCUM=int(options.accum)
+LRMULT=float(options.lrmult)
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
@@ -260,21 +261,28 @@ plist = [
     {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 optimizer = optim.Adam(plist, lr=LR)
-scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
+
+scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
+scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=LRMULT, total_epoch=2, after_scheduler=scheduler_cosine)
+
+# scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
 
-for epoch in range(EPOCHS):
+for tt, epoch in enumerate(range(EPOCHS)):
     logger.info('Epoch {}/{}'.format(epoch, EPOCHS - 1))
+    scheduler_warmup.step()
+    tr_loss = 0.
+    for param_group in optimizer.param_groups:
+        logger.info('Epoch: {} lr: {}'.format(epoch+1, param_group['lr'])) 
+
     logger.info('-' * 10)
     if epoch<START:
-        input_model_file = 'weights/sppnet_fold{}.bin'.format(epoch, FOLD)
+        input_model_file = 'weights/sppnet_fold{}_accum{}.bin'.format(epoch, FOLD, ACCUM)
         model.load_state_dict(torch.load(input_model_file))
         model.to(device)
         continue
     if INFER not in ['TST', 'EMB', 'VAL']:
-
-        tr_loss = 0.
         for param in model.parameters():
             param.requires_grad = True
         model.train()  
@@ -288,10 +296,11 @@ for epoch in range(EPOCHS):
             # Get loss
             loss = criterion(out, y)
             tr_loss += loss.item()
-            optimizer.zero_grad()
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
-            optimizer.step()
+            if tt % ACCUM == ACCUM -1 :             # Wait for several backward steps
+                optimizer.zero_grad()
+                optimizer.step()                            # Now we can do an optimizer step
             if step%100==0:
                 logger.info('Trn step {} of {} trn lossavg {:.5f}'. \
                         format(step, len(trnloader), (tr_loss/(1+step))))
@@ -299,7 +308,7 @@ for epoch in range(EPOCHS):
         torch.save(model.state_dict(), output_model_file)
         scheduler.step()
     else:
-        input_model_file = 'weights/sppnet_fold{}.bin'.format(epoch, FOLD)
+        input_model_file = 'weights/sppnet_fold{}_accum{}.bin'.format(epoch, FOLD, ACCUM)
         model.load_state_dict(torch.load(input_model_file))
         model.to(device)
     if INFER in ['VAL', 'TRN']:
@@ -321,9 +330,9 @@ for epoch in range(EPOCHS):
         valloss = log_loss(yactval, ypredval.clip(.00001,.99999))
         logger.info('Epoch {} val logloss {:.5f}'.format(epoch, valloss))
     
-logger.info('Write out bagged prediction to preds folder')
-yvaldf = valdataset.data.iloc[valids][['video', 'label']]
-yvaldf['pred'] = ypredval 
-yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}.csv.gz'.format(epoch), \
+    logger.info('Write out bagged prediction to preds folder')
+    yvaldf = valdataset.data.iloc[valids][['video', 'label']]
+    yvaldf['pred'] = ypredval 
+    yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}.csv.gz'.format(epoch), \
             index = False, compression = 'gzip')
 

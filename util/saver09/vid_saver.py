@@ -213,7 +213,7 @@ class DFakeVideoLoad(Dataset):
         df['video_path'] = vidpath+'/'+df['folder']+'/'+df['video']
         #logger.info('Full video file shape {} {}'.format(*df.shape))
         self.metadf = df.reset_index(drop=True)
-        self.vidfiles = self.metadf.video_path.tolist()[:100]
+        self.vidfiles = self.metadf.video_path.tolist()
         
     def __len__(self):
         return len(self.vidfiles)

@@ -31,7 +31,6 @@ import itertools
 import matplotlib.pylab as plt
 import warnings
 from torch.utils.data import Dataset, DataLoader
-
 warnings.filterwarnings("ignore")
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -79,6 +78,14 @@ logger.info('Cuda n_gpus : {}'.format(n_gpu ))
 logger.info('Load params : time {}'.format(datetime.datetime.now().time()))
 for (k,v) in options.__dict__.items():
     logger.info('{}{}'.format(k.ljust(20), v))
+    
+'''
+INPATH='/Users/dhanley2/Documents/Personal/dfake'
+SIZE=224
+FOLD=0
+MAXLOADSECONDS=3
+METAFILE = os.path.join(INPATH, 'data', options.metafile)
+'''
 
 SEED = int(options.seed)
 SIZE = int(options.size)
@@ -95,13 +102,7 @@ BATCHSIZE = int(options.batchsize)
 
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
-metadf = pd.read_csv(METAFILE)
-metadf['video_path'] = os.path.join(INPATH, options.vidpath) + '/' + metadf['folder'] + '/' + metadf['video']
-logger.info('Full video file shape {} {}'.format(*metadf.shape))
 
-metadf = metadf.query('fold == @FOLD')
-logger.info('Fold {} video file shape {} {}'.format(FOLD, *metadf.shape))
-VIDFILES = metadf.video_path.tolist()
 
 def imresizels(imgls, im_height, im_width, MAXDIM = 1000):
     if MAXDIM > max(im_height, im_width):
@@ -198,19 +199,43 @@ def gettrack(imgls, anchorframes, im_height, im_width, bsize = BATCHSIZE):
                     im_height, im_width, len(imgls), anchorframes, len(trackmat), len(list(itertools.chain(*faces)))))
     return trackmat, faces
 
+
 class DFakeVideoLoad(Dataset):
-    def __init__(self, metafile, vidpath, maxloadsec, fps):
+    def __init__(self, metafile, vidpath, fold, mnpath, modpath, config, \
+                 maxloadsec, fps, batchsize, outdir, framesize = SIZE,\
+                 initresize = 1024, confthresh=0.95, nmsthresh=0.4, saveimg = False):
 
         logger.info('Set up processing params')
+        self.fold = fold
+        self.initresize = initresize
         self.maxloadseconds = maxloadsec
         self.fps = fps
-                
+        self.batchsize = batchsize
+        self.saveimg = saveimg
+        self.outdir = outdir
+        self.size = framesize
+        
+        logger.info('Set up model')
+        self.mnpath = mnpath
+        self.modpath = modpath
+        self.cfg = config
+        self.cfg['confidence'] = confthresh
+        self.cfg['nms_threshold'] = nmsthresh
+        self.net = RetinaFace(self.cfg, phase = 'test', mnpath = self.mnpath)
+        self.net = load_fd_model(self.net, self.modpath, True)
+        self.net = self.net.to(device)
+        self.net.eval()
+        
         logger.info('Set up files to load')
         df = pd.read_csv(METAFILE)
         df['video_path'] = vidpath+'/'+df['folder']+'/'+df['video']
         logger.info('Full video file shape {} {}'.format(*df.shape))
         self.metadf = df.reset_index(drop=True)
         self.vidfiles = self.metadf.video_path.tolist()[:100]
+        
+        logger.info('Set up logging params')
+        self.logls = []
+        self.trackls = []
         
     def __len__(self):
         return len(self.vidfiles)
@@ -219,107 +244,100 @@ class DFakeVideoLoad(Dataset):
 
         vname = self.vidfiles[idx]
         logger.info('Process image {} : {}'.format(idx, vname.split('/')[-1]))
-        imgls, H, W = vid2imgls(vname, self.fps, self.maxloadseconds)
+        try:
+            imgls, H, W = vid2imgls(vname, self.fps, self.maxloadseconds)
+            # For most images we do not need the full size to find the boxes
+            thumbls, h, w = imresizels(imgls, H, W, MAXDIM = self.initresize)
+            trackmat, faces = gettrack(thumbls, self.fps//4, h, w, self.batchsize*2)
+            # If downsizing does not work, try with the original image 
+            if len(trackmat)<5 and max(H,W)<2000:
+                trackmat, faces = gettrack(imgls, self.fps//4, H, W, self.batchsize)
+                if len(trackmat)<5 and max(H,W)<2000:
+                    trackmat, faces = gettrack(imgls, self.fps//8, H, W, self.batchsize)  
+            else:
+                trackmat[['x1', 'x2']] = (trackmat[['x1', 'x2']]*(W/w)).astype(np.int32)
+                trackmat[['y1', 'y2']] = (trackmat[['y1', 'y2']]*(H/h)).astype(np.int32)
+            trackmat[['x1', 'x2']] = trackmat[['x1', 'x2']].clip(0, W)
+            trackmat[['y1', 'y2']] = trackmat[['y1', 'y2']].clip(0, H)
+            trackvid = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls) ))), \
+                         columns=['obj', 'frame'])
+            trackvid = trackvid.merge(trackmat, how = 'left')
+            trackvid = pd.concat([trackvid.query('obj==@o')\
+                                   .interpolate(method='piecewise_polynomial').dropna() \
+                 for o in trackvid['obj'].unique()], 0) \
+                    .astype(np.int).sort_values(['frame', 'obj'], 0) \
+                    .reset_index(drop=True)
+            trackvid.obj = trackvid.obj.astype('category').cat.codes
+            trackvid['video']=vname
+            trackvid['maxdim'] = pd.concat([trackvid.x2-trackvid.x1, 
+                                            trackvid.y2-trackvid.y1], axis=1).max(axis=1)
+            imgdict = collections.OrderedDict((o, []) for o in range(1+trackvid.obj.max()))         
+            for (t, row) in trackvid.iterrows():
+                obj = row.obj
+                frame = imgls[row.frame]
+                face = frame[row.y1:row.y1+row.maxdim, row.x1:row.x1+row.maxdim]
+                face = cv2.resize(face, (self.size,self.size), interpolation=cv2.INTER_CUBIC)
+                imgdict[obj].append(face)
+            trackfaces = np.array(sum(list(imgdict.values()), []))
+            trackvid = trackvid.sort_values(['obj', 'frame'], 0).reset_index(drop=True)
+            N_OBJ, N_FACES = len(trackvid.obj.unique()), len(trackvid)
+            self.trackls.append(trackvid)
+            if self.saveimg:
+                np.savez_compressed(os.path.join(OUTDIR, VNAME.split('/')[-1].replace('mp4', 'npz')), trackfaces)
+            self.logls.append([vname.split('/')[-1], N_OBJ, N_FACES])
+            return {'idx': idx, 'frames' : trackfaces}
+        except Exception:
+            logger.exception("Fatal error in main loop")
+
+def collatefn(batch):
+    # Remove error reads
+    batch = [b for b in batch if b is not None]
+    seqlen = torch.tensor([l['frames'].shape[0] for l in batch])
+    ids = torch.tensor([l['idx'] for l in batch])
+
+    maxlen = seqlen.max()    
+    # get shapes
+    d0,d1,d2,d3 = batch[0]['frames'].shape
         
-        return {'idx': idx, 'frames' : trackfaces, 'height': H, 'width': w}
-
-logger.info('Set up model')
-MODPATH = os.path.join(WTSFILES, 'retinaface/Resnet50_Final.pth')
-cfg = cfg_re50
-MNPATH = os.path.join(WTSFILES, 'retinaface/mobilenetV1X0.25_pretrain.tar')
-MODPATH = os.path.join(WTSFILES, 'retinaface/mobilenet0.25_Final.pth')
-cfg = cfg_mnet
-cfg['confidence'] = 0.95
-cfg['nms_threshold'] = 0.4
-
-net = RetinaFace(cfg, phase = 'test', mnpath = MNPATH)
-net = load_fd_model(net, MODPATH, True)
-net = net.to(device)
-net.eval()
+    # Pad with zero frames
+    x_batch = [l['frames'] if l['frames'].shape[0] == maxlen else \
+         torch.cat((l['frames'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
+         for l,sl in zip(batch, seqlen)]
+    x_batch = torch.cat([x.unsqueeze(0) for x in x_batch])
+    
+    return {'frames': x_batch, 'ids': ids, 'seqlen': seqlen, 'labels': y_batch}
 
 
-# Get anchor frames for boxes
-logls = []
-trackls = []
-counter = 0 
-#VIDFILES = ['/share/dhanley2/dfake/data/mount/train/dfdc_train_part_28/'+i for i in ['cdaxixbosp.mp4', 'btiysiskpf.mp4', 'clihsshdkq.mp4']]
+INPATH
 
 alldataset = DFakeVideoLoad(
+                        mnpath = os.path.join(WTSFILES, 'retinaface/mobilenetV1X0.25_pretrain.tar'),
+                        config = cfg_mnet,
+                        confthresh = 0.95,
+                        nmsthresh = 0.4,
+                        modpath = os.path.join(WTSFILES, 'retinaface/mobilenet0.25_Final.pth'),
                         metafile = METAFILE,
                         vidpath = os.path.join(INPATH, options.vidpath),
                         maxloadsec = MAXLOADSECONDS,
-                        fps = FPS)
+                        fps = FPS,
+                        batchsize = BATCHSIZE,
+                        saveimg = True,
+                        outdir = OUTDIR)
 allloader = DataLoader(alldataset, 
-                       batch_size=1, 
+                       batch_size=4, 
                        shuffle=False, 
-                       num_workers=8) 
-
-for tt, batch in enumerate(allloader):
-    START = datetime.datetime.now()
-    imgls = batch['frames'][0].numpy()
-    idx = batch['idx'].numpy()[0]
-    VNAME = alldataset.vidfiles[idx]
-    H = batch['height'].numpy()[0]
-    W = batch['width'].numpy()[0]
+                       num_workers=8, 
+                       collate_fn=collatefn)  
+    
+for step, batch in enumerate(allloader):
+    x = batch['frames']#.to(device, dtype=torch.float)
     y = batch['labels']#.to(device, dtype=torch.float)
-    try:
-        logger.info('Process image {} : {}'.format(tt, VNAME.split('/')[-1]))
-        imgls, H, W = vid2imgls(VNAME, FPS, MAXLOADSECONDS)
-        # For most images we do not need the full size to find the boxes
-        thumbls, h, w = imresizels(imgls, H, W, MAXDIM = 1280)
-        trackmat, faces = gettrack(thumbls, FPS//4, h, w, BATCHSIZE*2)
-        # If downsizing does not work, try with the original image 
-        if len(trackmat)<5 and max(H,W)<2000:
-            trackmat, faces = gettrack(imgls, FPS//4, H, W, BATCHSIZE)
-            if len(trackmat)<5 and max(H,W)<2000:
-                trackmat, faces = gettrack(imgls, FPS//8, H, W, BATCHSIZE)  
-        else:
-            trackmat[['x1', 'x2']] = (trackmat[['x1', 'x2']]*(W/w)).astype(np.int32)
-            trackmat[['y1', 'y2']] = (trackmat[['y1', 'y2']]*(H/h)).astype(np.int32)
-        # logger.info(trackmat)
-        trackmat[['x1', 'x2']] = trackmat[['x1', 'x2']].clip(0, W)
-        trackmat[['y1', 'y2']] = trackmat[['y1', 'y2']].clip(0, H)
-        #logger.info(trackmat)
-        trackvid = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls) ))), \
-                     columns=['obj', 'frame'])
-        trackvid = trackvid.merge(trackmat, how = 'left')
-        trackvid = pd.concat([trackvid.query('obj==@o')\
-                               .interpolate(method='piecewise_polynomial').dropna() \
-             for o in trackvid['obj'].unique()], 0) \
-                .astype(np.int).sort_values(['frame', 'obj'], 0) \
-                .reset_index(drop=True)
-        trackvid.obj = trackvid.obj.astype('category').cat.codes
-        trackvid['video']=VNAME
-        trackvid['maxdim'] = pd.concat([trackvid.x2-trackvid.x1, trackvid.y2-trackvid.y1], axis=1).max(axis=1)
-        #logger.info(trackvid.iloc[0])
-        imgdict = collections.OrderedDict((o, []) for o in range(1+trackvid.obj.max()))         
-        for (t, row) in trackvid.iterrows():
-            obj = row.obj
-            frame = imgls[row.frame]
-            face = frame[row.y1:row.y1+row.maxdim, row.x1:row.x1+row.maxdim]
-            face = cv2.resize(face, (SIZE,SIZE), interpolation=cv2.INTER_CUBIC)
-            imgdict[obj].append(face)
-        trackfaces = np.array(sum(list(imgdict.values()), []))
-        trackvid = trackvid.sort_values(['obj', 'frame'], 0).reset_index(drop=True)
-        N_OBJ, N_FACES = len(trackvid.obj.unique()), len(trackvid)
-        trackls.append(trackvid)
-        np.savez_compressed(os.path.join(OUTDIR, VNAME.split('/')[-1].replace('mp4', 'npz')), trackfaces)
-        END = datetime.datetime.now()
-        STATUS = 'sucess'
-    except Exception:
-        logger.exception("Fatal error in main loop")
-        END = datetime.datetime.now()
-        N_OBJ, N_FACES = 0, 0
-        STATUS = 'fail'
-    DURATION = int((END-START).total_seconds())
-    logls.append([VNAME.split('/')[-1], N_OBJ, N_FACES, DURATION, STATUS])
-    
-    
-logdf = pd.DataFrame(logls, columns = ['video', 'objectct', 'framect', 'duration', 'status'])
-trackdf = pd.concat(trackls, 0)
+
+logdf = pd.DataFrame(alldataset.logls, columns = ['video', 'objectct', 'framect', 'duration', 'status'])
+trackdf = pd.concat(alldataset.trackls, 0)
 trackdf['video'] = trackdf['video'].apply(lambda x: x.split('/')[-1])
-logdf.to_csv(os.path.join(OUTDIR, 'log_fold{}.txt'.format(FOLD)), index = False)
-trackdf.to_csv(os.path.join(OUTDIR, 'tracker_fold{}.txt'.format(FOLD)), index = False)
+logdf.to_csv(os.path.join(alldataset.outdir, 'log_fold{}.txt'.format(alldataset.fold)), index = False)
+trackdf.to_csv(os.path.join(alldataset.outdir, 'tracker_fold{}.txt'.format(alldataset.fold)), index = False)
 
 
         

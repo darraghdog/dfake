@@ -1,5 +1,5 @@
 N_GPU=1
-WDIR='saver08'
+WDIR='saver09'
 FOLD=0
 SIZE='224'
 

@@ -202,7 +202,7 @@ def gettrack(imgls, anchorframes, im_height, im_width, bsize = BATCHSIZE):
 
 class DFakeVideoLoad(Dataset):
     def __init__(self, metafile, vidpath, fold, mnpath, modpath, config, \
-                 maxloadsec, fps, device = device, batchsize, outdir, framesize = SIZE, \
+                 maxloadsec, fps, batchsize, outdir, framesize = SIZE,\
                  initresize = 1024, confthresh=0.95, nmsthresh=0.4, saveimg = False):
 
         logger.info('Set up processing params')
@@ -223,17 +223,19 @@ class DFakeVideoLoad(Dataset):
         self.cfg['nms_threshold'] = nmsthresh
         self.net = RetinaFace(self.cfg, phase = 'test', mnpath = self.mnpath)
         self.net = load_fd_model(self.net, self.modpath, True)
-        self.net = self.net.to(self.device)
+        self.net = self.net.to(device)
         self.net.eval()
         
         logger.info('Set up files to load')
         df = pd.read_csv(METAFILE)
-        df = vidpath+'/'+df['folder']+'/'+df['video']
-        logger.info('Fold {} full video file shape {} {}'.format(fold, *df.shape))
+        df['video_path'] = vidpath+'/'+df['folder']+'/'+df['video']
+        logger.info('Full video file shape {} {}'.format(*df.shape))
+        '''
         df = df.query('fold == @fold')
         logger.info('Fold {} video file shape {} {}'.format(fold, *df.shape))
+        '''
         self.metadf = df.reset_index(drop=True)
-        self.vidfiles = self.metadf.video_path.tolist()
+        self.vidfiles = self.metadf.video_path.tolist()[:100]
         
         logger.info('Set up logging params')
         self.logls = []
@@ -244,13 +246,13 @@ class DFakeVideoLoad(Dataset):
     
     def __getitem__(self, idx):
 
-        vname = self.vidfiles.iloc[idx]
+        vname = self.vidfiles[idx]
         logger.info('Process image {} : {}'.format(idx, vname.split('/')[-1]))
         try:
             imgls, H, W = vid2imgls(vname, self.fps, self.maxloadseconds)
             # For most images we do not need the full size to find the boxes
             thumbls, h, w = imresizels(imgls, H, W, MAXDIM = self.initresize)
-            trackmat, faces = gettrack(thumbls, self.fps//4, h, w, *2)
+            trackmat, faces = gettrack(thumbls, self.fps//4, h, w, self.batchsize*2)
             # If downsizing does not work, try with the original image 
             if len(trackmat)<5 and max(H,W)<2000:
                 trackmat, faces = gettrack(imgls, self.fps//4, H, W, self.batchsize)
@@ -313,11 +315,11 @@ def collatefn(batch):
 INPATH
 
 alldataset = DFakeVideoLoad(
-                        mnpath = 'retinaface/mobilenetV1X0.25_pretrain.tar',
-                        cfg = cfg_mnet,
-                        cfg['confidence'] = 0.95,
-                        cfg['nms_threshold'] = 0.4,
-                        modpath = 'retinaface/mobilenet0.25_Final.pth',
+                        mnpath = os.path.join(WTSFILES, 'retinaface/mobilenetV1X0.25_pretrain.tar'),
+                        config = cfg_mnet,
+                        confthresh = 0.95,
+                        nmsthresh = 0.4,
+                        modpath = os.path.join(WTSFILES, 'retinaface/mobilenet0.25_Final.pth'),
                         metafile = METAFILE,
                         vidpath = os.path.join(INPATH, options.vidpath),
                         fold = 0,

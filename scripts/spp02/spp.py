@@ -263,7 +263,7 @@ plist = [
 optimizer = optim.Adam(plist, lr=LR)
 
 scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
-scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=LRMULT, total_epoch=2, after_scheduler=scheduler_cosine)
+scheduler_warmup = GradualWarmupScheduler(optimizer, multiplier=LRMULT, total_epoch=1, after_scheduler=scheduler_cosine)
 
 # scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
@@ -298,15 +298,14 @@ for tt, epoch in enumerate(range(EPOCHS)):
             tr_loss += loss.item()
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
-            if tt % ACCUM == ACCUM -1 :             # Wait for several backward steps
-                optimizer.zero_grad()
+            if step % ACCUM == ACCUM -1 :             # Wait for several backward steps
                 optimizer.step()                            # Now we can do an optimizer step
+                optimizer.zero_grad()
             if step%100==0:
                 logger.info('Trn step {} of {} trn lossavg {:.5f}'. \
                         format(step, len(trnloader), (tr_loss/(1+step))))
         output_model_file = 'weights/sppnet_fold{}.bin'.format(epoch, FOLD)
         torch.save(model.state_dict(), output_model_file)
-        scheduler.step()
     else:
         input_model_file = 'weights/sppnet_fold{}_accum{}.bin'.format(epoch, FOLD, ACCUM)
         model.load_state_dict(torch.load(input_model_file))

@@ -30,6 +30,7 @@ import random
 import optparse
 import itertools
 from mtcnn import MTCNN
+import tensorflow
 
 #from facenet_pytorch import MTCNN, InceptionResnetV1
 import matplotlib.pylab as plt
@@ -72,6 +73,9 @@ n_gpu = torch.cuda.device_count()
 logger.info('Cuda n_gpus : {}'.format(n_gpu ))
 
 
+#from tensorflow.python.client import device_lib
+#logger.info(device_lib.list_local_devices())
+
 logger.info('Load params : time {}'.format(datetime.datetime.now().time()))
 for (k,v) in options.__dict__.items():
     logger.info('{}{}'.format(k.ljust(20), v))
@@ -99,9 +103,7 @@ logger.info('Fold {} video file shape {} {}'.format(FOLD, *metadf.shape))
 VIDFILES = metadf.video_path.tolist()
 
 def mtc2dlib(det):
-    det = [d['box'] for d in det]
-    det = [[(d[0], d[1]), (d[0]+d[2], d[1]+d[3])] for d in det]
-    return det
+    return [[ d['box'][0], d['box'][1], d['box'][0]+d['box'][2], d['box'][1]+d['box'][3], d['confidence']  ] for d in det ]
 
 def vid2imgls(fname, FPS=8):
     imgs = []
@@ -131,8 +133,10 @@ def face_bbox(image, fn = face_detector, RESIZE_MAXDIM = 500, fdetect='dlib' ):
             gray = cv2.resize(gray, RESIZE, interpolation=cv2.INTER_CUBIC)
             faces = fn(gray, 1)
         else:
-            img = cv2.resize(image, RESIZE, interpolation=cv2.INTER_CUBIC)
-            faces = mtc2dlib(detector.detect_faces(img))
+            # img = cv2.resize(image, RESIZE, interpolation=cv2.INTER_CUBIC)
+            faces = detector.detect_faces(image)
+            logger.info(faces)
+            faces = mtc2dlib(detector.detect_faces(faces))
         facesls += [[f.rect.left()*WIDTH_DOWNSIZE, 
                   f.rect.top()*HEIGHT_DOWNSIZE, 
                   f.rect.right()*WIDTH_DOWNSIZE,
@@ -142,7 +146,17 @@ def face_bbox(image, fn = face_detector, RESIZE_MAXDIM = 500, fdetect='dlib' ):
     except:
         logger.info('Bad image returned')
         return []
-    
+'''
+def face_bbox(image, fn = face_detector, RESIZE_MAXDIM = 500, fdetect='dlib' ):
+    warnings.filterwarnings("ignore")
+    try:
+        faces = detector.detect_faces(image)
+        faces = mtc2dlib(faces)
+        return faces
+    except:
+        logger.info('Bad image returned')
+        return []
+'''
 
 # Make tracker for box areas
 def sortbbox(faces, anchorframes, thresh = 3, max_age = 1):
@@ -178,18 +192,18 @@ for tt, VNAME in enumerate(VIDFILES):
         probebbox, MAXDIM = [], STARTSIZE
         probels = random.sample(imgls, k = 2)
         while (len(probebbox)==0) and MAXDIM < max(H,W):
-            probebbox = list(itertools.chain(*[face_bbox(p, RESIZE_MAXDIM = MAXDIM) for p in probels]))
+            probebbox = list(itertools.chain(*[face_bbox(p, RESIZE_MAXDIM = MAXDIM, fdetect='dlib') for p in probels]))
             if len(probebbox)==0 : MAXDIM *= 1.3
         if len(probebbox)==0:
             raise Exception('Cannot find faces')
-        trackmat, faces = gettrack(imgls, FPS//2, MAXDIM, fdetect='dlib')
+        trackmat, faces = gettrack(imgls, FPS//2, MAXDIM , fdetect='dlib')
         if len(trackmat)<4:
             trackmat, faces = gettrack(imgls, FPS//4, min(max(H,W),1000), fdetect='dlib') 
-        if len(trackmat)<2:
-            trackmat, faces = gettrack(imgls, FPS//4, min(max(H,W),1000), fdetect='mtcnn') 
-            if len(trackmat)>2:
-                logger.info('mtcnn worked, not dlib'.format(VNAME.split('/')[-1]))
-
+        #if len(trackmat)<2:
+        #    trackmat, faces = gettrack(imgls, FPS//4, min(max(H,W),1000), fdetect='mtcnn') 
+        #    if len(trackmat)>2:
+        #        logger.info('mtcnn worked, not dlib'.format(VNAME.split('/')[-1]))
+        #trackmat, faces = gettrack(imgls, FPS//4, 1000, fdetect='mtcnn')
         trackvid = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls) ))), \
                      columns=['obj', 'frame'])
         trackvid = trackvid.merge(trackmat, how = 'left')

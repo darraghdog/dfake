@@ -230,6 +230,8 @@ for tt, VNAME in enumerate(VIDFILES):
         # If downsizing does not work, try with the original image 
         if len(trackmat)<5 and max(H,W)<2000:
             trackmat, faces = gettrack(imgls, FPS//4, H, W, BATCHSIZE)
+            if len(trackmat)<5 and max(H,W)<2000:
+                trackmat, faces = gettrack(imgls, FPS//8, H, W, BATCHSIZE)  
         else:
             trackmat[['x1', 'x2']] = (trackmat[['x1', 'x2']]*(W/w)).astype(np.int32)
             trackmat[['y1', 'y2']] = (trackmat[['y1', 'y2']]*(H/h)).astype(np.int32)

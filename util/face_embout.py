@@ -24,6 +24,8 @@ from utils.utils import py_cpu_nms, load_fd_model, remove_prefix
 from utils.retinaface import RetinaFace
 from sklearn.metrics.pairwise import cosine_similarity
 from utils.face_embedding import InceptionResnetV1
+from sklearn.cluster import MiniBatchKMeans
+
 warnings.filterwarnings("ignore")
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
@@ -96,5 +98,13 @@ logger.info('Concat and write out')
 allemb = np.concatenate(embls)
 allemb = pd.DataFrame(allemb, index = idxls, columns = ['emb'+str(x) for x in range(512)])
 outdf = pd.concat([trackdf, allemb], 1).dropna(0)
-outdf.to_csv(os.path.join(INPATH, 'data/face_embeddings.csv.gz'), compression = 'gzip', index = False) 
+outdf.to_csv(os.path.join(INPATH, 'data/face_embeddings.csv.gz'), compression = 'gzip', index = False)
+
+allemb = outdf.filter(like='emb').values
+kmeans = MiniBatchKMeans(n_clusters=100,random_state=0,batch_size=10000,max_iter=40, verbose=2)
+kmeans.fit(allemb)
+outdf['cluster'] = kmeans.predict(allemb)
 logshape(outdf)
+outdf[[c for c in outdf.columns if 'emb' not in c]].to_csv(\
+     os.path.join(INPATH, 'data/face_clusters.csv.gz'), index = False, compression = 'gzip')
+

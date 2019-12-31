@@ -60,7 +60,7 @@ trackdf = pd.concat(trackdf)
 trackdf = trackdf[trackdf.video.isin(metadf.video)].reset_index(drop=True)
 trackdf['objseq'] =  trackdf.groupby(['video', 'obj']).cumcount()
 trackdf = trackdf[['video', 'obj', 'frame', 'objseq']]
-logshape(trackdf)
+logger.info('Track df shape {} {}'.format(*trackdf.shape))
 
 
 logger.info('Load model')
@@ -74,7 +74,6 @@ logger.info('Load Numpy arrays and get embeddings')
 batch = []
 embls = []
 idxls = []
-trackdf = trackdf[:200]
 DIM = trackdf.index.max()
 for t, row in trackdf.iterrows():
     video, obj, frame, objid = row

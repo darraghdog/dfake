@@ -1,0 +1,290 @@
+Sender: LSF System <lsfadmin@dbslp1897>
+Subject: Job 54527: <sh -c "cd /share/dhanley2/dfake/util/saver09  && python3 vid_saver.py              --startsize 768 --batchsize 16 --fold 5  --rootpath /share/dhanley2/dfake/ --vidpath data/mount/train --metafile trainmeta.csv.gz              --loadseconds 6 --imgpath data/mount/npimg09 --size 224 --wtspath weights --fps 8"> in cluster <osfi_hpc> Done
+
+Job <sh -c "cd /share/dhanley2/dfake/util/saver09  && python3 vid_saver.py              --startsize 768 --batchsize 16 --fold 5  --rootpath /share/dhanley2/dfake/ --vidpath data/mount/train --metafile trainmeta.csv.gz              --loadseconds 6 --imgpath data/mount/npimg09 --size 224 --wtspath weights --fps 8"> was submitted from host <dbslp1204> by user <dhanley2> in cluster <osfi_hpc> at Mon Dec 30 13:57:28 2019
+Job was executed on host(s) <dbslp1897>, in queue <low2>, as user <dhanley2> in cluster <osfi_hpc> at Mon Dec 30 13:57:28 2019
+</home/dhanley2> was used as the home directory.
+</mnt/lsf/share/dhanley2/dfake/util/saver09> was used as the working directory.
+Started at Mon Dec 30 13:57:28 2019
+Terminated at Mon Dec 30 13:59:41 2019
+Results reported at Mon Dec 30 13:59:41 2019
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+sh -c "cd /share/dhanley2/dfake/util/saver09  && python3 vid_saver.py              --startsize 768 --batchsize 16 --fold 5  --rootpath /share/dhanley2/dfake/ --vidpath data/mount/train --metafile trainmeta.csv.gz              --loadseconds 6 --imgpath data/mount/npimg09 --size 224 --wtspath weights --fps 8"
+------------------------------------------------------------
+
+Successfully completed.
+
+Resource usage summary:
+
+    CPU time :                                   1019.78 sec.
+    Max Memory :                                 5937 MB
+    Average Memory :                             5016.43 MB
+    Total Requested Memory :                     -
+    Delta Memory :                               -
+    Max Swap :                                   2 MB
+    Max Processes :                              10
+    Max Threads :                                629
+    Run time :                                   134 sec.
+    Turnaround time :                            133 sec.
+
+The output (if any) follows:
+
+
+=============
+== PyTorch ==
+=============
+
+NVIDIA Release 19.09 (build 7911588)
+PyTorch Version 1.2.0a0+afb7a16
+
+Container image Copyright (c) 2019, NVIDIA CORPORATION.  All rights reserved.
+
+Copyright (c) 2014-2019 Facebook Inc.
+Copyright (c) 2011-2014 Idiap Research Institute (Ronan Collobert)
+Copyright (c) 2012-2014 Deepmind Technologies    (Koray Kavukcuoglu)
+Copyright (c) 2011-2012 NEC Laboratories America (Koray Kavukcuoglu)
+Copyright (c) 2011-2013 NYU                      (Clement Farabet)
+Copyright (c) 2006-2010 NEC Laboratories America (Ronan Collobert, Leon Bottou, Iain Melvin, Jason Weston)
+Copyright (c) 2006      Idiap Research Institute (Samy Bengio)
+Copyright (c) 2001-2004 Idiap Research Institute (Ronan Collobert, Samy Bengio, Johnny Mariethoz)
+Copyright (c) 2015      Google Inc.
+Copyright (c) 2015      Yangqing Jia
+Copyright (c) 2013-2016 The Caffe contributors
+All rights reserved.
+
+Various files include modifications (c) NVIDIA CORPORATION.  All rights reserved.
+NVIDIA modifications are covered by the license terms that apply to the underlying project or file.
+
+NOTE: Legacy NVIDIA Driver detected.  Compatibility mode ENABLED.
+
+NOTE: Detected MOFED driver 4.3-1.0.1; version automatically updated.
+
+/opt/conda/lib/python3.6/site-packages/sklearn/utils/linear_assignment_.py:21: DeprecationWarning: The linear_assignment_ module is deprecated in 0.21 and will be removed from 0.23. Use scipy.optimize.linear_sum_assignment instead.
+  DeprecationWarning)
+2019-12-30 13:57:34,753 - Video to image : - INFO - Cuda set up : time 13:57:34.753747
+2019-12-30 13:57:34,756 - Video to image : - INFO - Device : Tesla V100-SXM2-16GB
+2019-12-30 13:57:34,756 - Video to image : - INFO - Cuda available : True
+2019-12-30 13:57:34,756 - Video to image : - INFO - Cuda n_gpus : 1
+2019-12-30 13:57:34,756 - Video to image : - INFO - Load params : time 13:57:34.756228
+2019-12-30 13:57:34,756 - Video to image : - INFO - seed                1234
+2019-12-30 13:57:34,756 - Video to image : - INFO - fold                5
+2019-12-30 13:57:34,756 - Video to image : - INFO - rootpath            /share/dhanley2/dfake/
+2019-12-30 13:57:34,756 - Video to image : - INFO - vidpath             data/mount/train
+2019-12-30 13:57:34,756 - Video to image : - INFO - imgpath             data/mount/npimg09
+2019-12-30 13:57:34,756 - Video to image : - INFO - wtspath             weights
+2019-12-30 13:57:34,756 - Video to image : - INFO - fps                 8
+2019-12-30 13:57:34,756 - Video to image : - INFO - size                224
+2019-12-30 13:57:34,756 - Video to image : - INFO - metafile            trainmeta.csv.gz
+2019-12-30 13:57:34,756 - Video to image : - INFO - startsize           768
+2019-12-30 13:57:34,756 - Video to image : - INFO - batchsize           16
+2019-12-30 13:57:34,756 - Video to image : - INFO - loadseconds         6
+2019-12-30 13:57:35,040 - Video to image : - INFO - Full video file shape 119154 7
+2019-12-30 13:57:35,074 - Video to image : - INFO - Fold 5 video file shape 0 7
+2019-12-30 13:57:35,074 - Video to image : - INFO - Set up model
+Running on device: cuda:0
+Loading pretrained model from /share/dhanley2/dfake/weights/retinaface/mobilenet0.25_Final.pth
+remove prefix 'module.'
+2019-12-30 13:57:39,869 - Video to image : - INFO - Process image 0 : oltjahgizr.mp4
+2019-12-30 13:57:43,225 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:57:43,561 - Video to image : - INFO - Process image 1 : zvohlgbccy.mp4
+2019-12-30 13:57:44,402 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:57:44,683 - Video to image : - INFO - Process image 2 : bijcbfrxyc.mp4
+2019-12-30 13:57:45,486 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:57:45,774 - Video to image : - INFO - Process image 3 : pbsuigiaru.mp4
+2019-12-30 13:57:46,574 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:57:46,860 - Video to image : - INFO - Process image 4 : ovtiiepztg.mp4
+2019-12-30 13:57:47,674 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:57:47,993 - Video to image : - INFO - Process image 5 : ppnlasqbib.mp4
+2019-12-30 13:57:48,780 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:57:49,068 - Video to image : - INFO - Process image 6 : onkvupoapt.mp4
+2019-12-30 13:57:49,848 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:57:50,146 - Video to image : - INFO - Process image 7 : sbddnndmzk.mp4
+2019-12-30 13:57:50,937 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:57:51,240 - Video to image : - INFO - Process image 8 : pvjybkpdsy.mp4
+2019-12-30 13:57:52,049 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:57:52,331 - Video to image : - INFO - Process image 9 : jsijpxmjir.mp4
+2019-12-30 13:57:53,110 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:57:53,390 - Video to image : - INFO - Process image 10 : exewzykbsv.mp4
+2019-12-30 13:57:54,176 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:57:54,482 - Video to image : - INFO - Process image 11 : ivexyynvqc.mp4
+2019-12-30 13:57:55,257 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:57:55,510 - Video to image : - INFO - Process image 12 : kmgribiuez.mp4
+2019-12-30 13:57:56,317 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:57:56,586 - Video to image : - INFO - Process image 13 : nhdjglbekk.mp4
+2019-12-30 13:57:57,352 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:57:57,643 - Video to image : - INFO - Process image 14 : tsidhveryz.mp4
+2019-12-30 13:57:58,457 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:57:58,752 - Video to image : - INFO - Process image 15 : hbpuinlogb.mp4
+2019-12-30 13:57:59,543 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:57:59,823 - Video to image : - INFO - Process image 16 : npayobbfjy.mp4
+2019-12-30 13:58:00,602 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:00,914 - Video to image : - INFO - Process image 17 : wpvonwowfm.mp4
+2019-12-30 13:58:01,862 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:58:02,130 - Video to image : - INFO - Process image 18 : iegunvihwt.mp4
+2019-12-30 13:58:02,964 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:58:03,233 - Video to image : - INFO - Process image 19 : betuzngwpt.mp4
+2019-12-30 13:58:04,024 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:58:04,299 - Video to image : - INFO - Process image 20 : gernycxeyx.mp4
+2019-12-30 13:58:05,247 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 16 Faces count 23
+2019-12-30 13:58:05,519 - Video to image : - INFO - Process image 21 : cqojknfuus.mp4
+2019-12-30 13:58:06,321 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:06,622 - Video to image : - INFO - Process image 22 : hhmsbuyugf.mp4
+2019-12-30 13:58:07,402 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:07,732 - Video to image : - INFO - Process image 23 : axbwohvwap.mp4
+2019-12-30 13:58:08,537 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 18 Faces count 23
+2019-12-30 13:58:08,848 - Video to image : - INFO - Process image 24 : ggpfchdgjx.mp4
+2019-12-30 13:58:09,755 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:10,063 - Video to image : - INFO - Process image 25 : kbdwpgaurl.mp4
+2019-12-30 13:58:10,845 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 14 Faces count 22
+2019-12-30 13:58:11,106 - Video to image : - INFO - Process image 26 : qwdihfkpyi.mp4
+2019-12-30 13:58:11,887 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 18 Faces count 23
+2019-12-30 13:58:12,194 - Video to image : - INFO - Process image 27 : hiwlkmphat.mp4
+2019-12-30 13:58:12,975 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:13,279 - Video to image : - INFO - Process image 28 : mitjfkkjqo.mp4
+2019-12-30 13:58:14,044 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:14,346 - Video to image : - INFO - Process image 29 : qirlrtrxba.mp4
+2019-12-30 13:58:15,153 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:15,482 - Video to image : - INFO - Process image 30 : gwhdmjsjlp.mp4
+2019-12-30 13:58:16,370 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:16,687 - Video to image : - INFO - Process image 31 : oibiczyubz.mp4
+2019-12-30 13:58:17,519 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:17,840 - Video to image : - INFO - Process image 32 : rsssrzjlfl.mp4
+2019-12-30 13:58:18,670 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:18,987 - Video to image : - INFO - Process image 33 : mmrmyjuqdz.mp4
+2019-12-30 13:58:19,883 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:20,187 - Video to image : - INFO - Process image 34 : adcejihrnp.mp4
+2019-12-30 13:58:20,984 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:21,301 - Video to image : - INFO - Process image 35 : doyfynweis.mp4
+2019-12-30 13:58:22,089 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:22,399 - Video to image : - INFO - Process image 36 : rwjipjzwpn.mp4
+2019-12-30 13:58:23,169 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:23,578 - Video to image : - INFO - Process image 37 : cewalfidka.mp4
+2019-12-30 13:58:24,366 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:24,673 - Video to image : - INFO - Process image 38 : jyvbjopxlv.mp4
+2019-12-30 13:58:25,454 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:25,761 - Video to image : - INFO - Process image 39 : cqemqttubw.mp4
+2019-12-30 13:58:26,543 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:26,851 - Video to image : - INFO - Process image 40 : aaapwqhxli.mp4
+2019-12-30 13:58:27,649 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:27,967 - Video to image : - INFO - Process image 41 : uycqpeidlg.mp4
+2019-12-30 13:58:28,837 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:29,171 - Video to image : - INFO - Process image 42 : gphwezuwrb.mp4
+2019-12-30 13:58:30,087 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 19 Faces count 23
+2019-12-30 13:58:30,410 - Video to image : - INFO - Process image 43 : kjwdtqztjn.mp4
+2019-12-30 13:58:31,196 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 22
+2019-12-30 13:58:31,527 - Video to image : - INFO - Process image 44 : etygjbrhzn.mp4
+2019-12-30 13:58:32,313 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 8 Faces count 16
+2019-12-30 13:58:32,504 - Video to image : - INFO - Process image 45 : pjenbuiakt.mp4
+2019-12-30 13:58:33,346 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:33,618 - Video to image : - INFO - Process image 46 : katagkpjku.mp4
+2019-12-30 13:58:34,403 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:34,691 - Video to image : - INFO - Process image 47 : mlqcbzzohi.mp4
+2019-12-30 13:58:35,561 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:35,865 - Video to image : - INFO - Process image 48 : junyrlainl.mp4
+2019-12-30 13:58:36,670 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:36,976 - Video to image : - INFO - Process image 49 : woqlxgsmct.mp4
+2019-12-30 13:58:37,756 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:38,065 - Video to image : - INFO - Process image 50 : fkytehbasw.mp4
+2019-12-30 13:58:38,873 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 10 Faces count 23
+2019-12-30 13:58:39,169 - Video to image : - INFO - Process image 51 : wsddribrjr.mp4
+2019-12-30 13:58:40,060 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:40,337 - Video to image : - INFO - Process image 52 : dhsvhffmmv.mp4
+2019-12-30 13:58:41,140 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:41,425 - Video to image : - INFO - Process image 53 : tiaatozsiv.mp4
+2019-12-30 13:58:42,258 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:42,559 - Video to image : - INFO - Process image 54 : mwoeriylvo.mp4
+2019-12-30 13:58:43,364 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:43,645 - Video to image : - INFO - Process image 55 : eenmkbzwie.mp4
+2019-12-30 13:58:44,421 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:44,705 - Video to image : - INFO - Process image 56 : vblmiqnntb.mp4
+2019-12-30 13:58:45,492 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:45,755 - Video to image : - INFO - Process image 57 : osufrflpnf.mp4
+2019-12-30 13:58:46,523 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 14 Faces count 22
+2019-12-30 13:58:46,796 - Video to image : - INFO - Process image 58 : niboxwakue.mp4
+2019-12-30 13:58:47,605 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:47,915 - Video to image : - INFO - Process image 59 : vqxgubkkuu.mp4
+2019-12-30 13:58:48,727 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:48,987 - Video to image : - INFO - Process image 60 : dkxbvpgztu.mp4
+2019-12-30 13:58:49,812 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:50,089 - Video to image : - INFO - Process image 61 : kuqxfkvnzp.mp4
+2019-12-30 13:58:50,934 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 8 Faces count 19
+2019-12-30 13:58:51,198 - Video to image : - INFO - Process image 62 : kncsobhrlq.mp4
+2019-12-30 13:58:52,016 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 8 Faces count 23
+2019-12-30 13:58:52,266 - Video to image : - INFO - Process image 63 : wdtjgdgnwq.mp4
+2019-12-30 13:58:53,068 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 11 Faces count 22
+2019-12-30 13:58:53,369 - Video to image : - INFO - Process image 64 : icogfaodkh.mp4
+2019-12-30 13:58:54,303 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 9 Faces count 23
+2019-12-30 13:58:54,579 - Video to image : - INFO - Process image 65 : rhvdrqlhxe.mp4
+2019-12-30 13:58:55,398 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:58:56,003 - Video to image : - INFO - Process image 66 : nnxkvtdqrd.mp4
+2019-12-30 13:58:56,842 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:58:57,451 - Video to image : - INFO - Process image 67 : knwomsqidk.mp4
+2019-12-30 13:58:58,435 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:58:59,077 - Video to image : - INFO - Process image 68 : qkgjlvkxtj.mp4
+2019-12-30 13:58:59,851 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:00,466 - Video to image : - INFO - Process image 69 : ajhmvnssbb.mp4
+2019-12-30 13:59:01,294 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:01,972 - Video to image : - INFO - Process image 70 : ehqyvztebg.mp4
+2019-12-30 13:59:02,835 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:03,467 - Video to image : - INFO - Process image 71 : xuopnqdjhl.mp4
+2019-12-30 13:59:04,329 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:04,976 - Video to image : - INFO - Process image 72 : qbfxidkjyc.mp4
+2019-12-30 13:59:05,804 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:06,424 - Video to image : - INFO - Process image 73 : epefspyufn.mp4
+2019-12-30 13:59:07,273 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:07,902 - Video to image : - INFO - Process image 74 : lbrlutazmo.mp4
+2019-12-30 13:59:08,678 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:09,297 - Video to image : - INFO - Process image 75 : fkdmipkufb.mp4
+2019-12-30 13:59:10,070 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:10,727 - Video to image : - INFO - Process image 76 : cdrktlivps.mp4
+2019-12-30 13:59:11,493 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:12,111 - Video to image : - INFO - Process image 77 : inwvkwgbae.mp4
+2019-12-30 13:59:12,883 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:13,500 - Video to image : - INFO - Process image 78 : hajmqkklsy.mp4
+2019-12-30 13:59:14,269 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:14,907 - Video to image : - INFO - Process image 79 : sggkwmtcul.mp4
+2019-12-30 13:59:15,745 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 46 Faces count 46
+2019-12-30 13:59:16,375 - Video to image : - INFO - Process image 80 : xhscyrzbhh.mp4
+2019-12-30 13:59:17,183 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:17,560 - Video to image : - INFO - Process image 81 : iwviwwoqkf.mp4
+2019-12-30 13:59:18,350 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:18,714 - Video to image : - INFO - Process image 82 : yhkteosfqs.mp4
+2019-12-30 13:59:19,540 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:19,927 - Video to image : - INFO - Process image 83 : rdobrtuvqk.mp4
+2019-12-30 13:59:20,710 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:21,067 - Video to image : - INFO - Process image 84 : ogkxbszfbf.mp4
+2019-12-30 13:59:21,916 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:22,285 - Video to image : - INFO - Process image 85 : ekozfobxxw.mp4
+2019-12-30 13:59:23,017 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:23,420 - Video to image : - INFO - Process image 86 : tqcvwosock.mp4
+2019-12-30 13:59:24,212 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:24,575 - Video to image : - INFO - Process image 87 : fyhpcyepmd.mp4
+2019-12-30 13:59:25,396 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:25,760 - Video to image : - INFO - Process image 88 : rwhocevtfb.mp4
+2019-12-30 13:59:26,673 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:27,031 - Video to image : - INFO - Process image 89 : deeqmpacic.mp4
+2019-12-30 13:59:27,844 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:28,206 - Video to image : - INFO - Process image 90 : bdiointpxx.mp4
+2019-12-30 13:59:29,017 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:29,368 - Video to image : - INFO - Process image 91 : jymmnlytlx.mp4
+2019-12-30 13:59:30,173 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:30,547 - Video to image : - INFO - Process image 92 : mlcxxmlikg.mp4
+2019-12-30 13:59:31,279 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:31,692 - Video to image : - INFO - Process image 93 : nnifcnwpnc.mp4
+2019-12-30 13:59:32,439 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:32,817 - Video to image : - INFO - Process image 94 : zsuvnzgxby.mp4
+2019-12-30 13:59:33,605 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:33,985 - Video to image : - INFO - Process image 95 : yibebkpvhz.mp4
+2019-12-30 13:59:34,822 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:35,171 - Video to image : - INFO - Process image 96 : sbfleznbmc.mp4
+2019-12-30 13:59:35,912 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:36,275 - Video to image : - INFO - Process image 97 : jfbdksvkgn.mp4
+2019-12-30 13:59:37,068 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:37,443 - Video to image : - INFO - Process image 98 : baoszfmdlj.mp4
+2019-12-30 13:59:38,188 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 23 Faces count 23
+2019-12-30 13:59:38,571 - Video to image : - INFO - Process image 99 : xgrixqwsjy.mp4
+2019-12-30 13:59:39,444 - Video to image : - INFO - Video dimension 432 768 Frames 46 Anchor frames 2 Tracker length 34 Faces count 37

@@ -189,11 +189,14 @@ def sortbbox(faces, anchorframes, thresh = 3, max_age = 1):
     return trackmat
 
 def gettrack(imgls, anchorframes, im_height, im_width, bsize = BATCHSIZE):
+    #logger.info('Start CUDA processing')
     imgl = [i for t, i in enumerate(imgls) if t % anchorframes ==0 ]
     faces = [face_bbox(l, im_height, im_width) for l in chunks(imgl, bsize)]
     faces = list(chain(*faces))
+    #logger.info('Start SORT processing')
     #logger.info(faces)
     trackmat = sortbbox(faces, anchorframes, thresh = 2)  
+    #logger.info('Complete SORT processing')
     logger.info('Video dimension {} {} Frames {} Anchor frames {} Tracker length {} Faces count {}'.format(\
                     im_height, im_width, len(imgls), anchorframes, len(trackmat), len(list(itertools.chain(*faces)))))
     return trackmat, faces
@@ -201,16 +204,16 @@ def gettrack(imgls, anchorframes, im_height, im_width, bsize = BATCHSIZE):
 class DFakeVideoLoad(Dataset):
     def __init__(self, metafile, vidpath, maxloadsec, fps):
 
-        logger.info('Set up processing params')
+        #logger.info('Set up processing params')
         self.maxloadseconds = maxloadsec
         self.fps = fps
                 
-        logger.info('Set up files to load')
+        #logger.info('Set up files to load')
         df = pd.read_csv(METAFILE)
         df['video_path'] = vidpath+'/'+df['folder']+'/'+df['video']
-        logger.info('Full video file shape {} {}'.format(*df.shape))
+        #logger.info('Full video file shape {} {}'.format(*df.shape))
         self.metadf = df.reset_index(drop=True)
-        self.vidfiles = self.metadf.video_path.tolist()[:100]
+        self.vidfiles = self.metadf.video_path.tolist()
         
     def __len__(self):
         return len(self.vidfiles)
@@ -218,10 +221,11 @@ class DFakeVideoLoad(Dataset):
     def __getitem__(self, idx):
 
         vname = self.vidfiles[idx]
-        logger.info('Process image {} : {}'.format(idx, vname.split('/')[-1]))
+        #logger.info('Process image {} : {}'.format(idx, vname.split('/')[-1]))
         imgls, H, W = vid2imgls(vname, self.fps, self.maxloadseconds)
-        
-        return {'idx': idx, 'frames' : trackfaces, 'height': H, 'width': w}
+        #imgls = torch.from_numpy(np.array(imgls)).long()
+        #logger.info('Process image complete {} : {}'.format(idx, vname.split('/')[-1]))
+        return {'idx': idx, 'frames' : imgls, 'height': H, 'width': W}
 
 logger.info('Set up model')
 MODPATH = os.path.join(WTSFILES, 'retinaface/Resnet50_Final.pth')
@@ -252,8 +256,8 @@ alldataset = DFakeVideoLoad(
 allloader = DataLoader(alldataset, 
                        batch_size=1, 
                        shuffle=False, 
-                       num_workers=8) 
-
+                       num_workers=4)
+ 
 for tt, batch in enumerate(allloader):
     START = datetime.datetime.now()
     imgls = batch['frames'][0].numpy()
@@ -261,13 +265,12 @@ for tt, batch in enumerate(allloader):
     VNAME = alldataset.vidfiles[idx]
     H = batch['height'].numpy()[0]
     W = batch['width'].numpy()[0]
-    y = batch['labels']#.to(device, dtype=torch.float)
     try:
         logger.info('Process image {} : {}'.format(tt, VNAME.split('/')[-1]))
         imgls, H, W = vid2imgls(VNAME, FPS, MAXLOADSECONDS)
         # For most images we do not need the full size to find the boxes
-        thumbls, h, w = imresizels(imgls, H, W, MAXDIM = 1280)
-        trackmat, faces = gettrack(thumbls, FPS//4, h, w, BATCHSIZE*2)
+        thumbls, h, w = imresizels(imgls, H, W, MAXDIM = STARTSIZE)
+        trackmat, faces = gettrack(thumbls, FPS//4, h, w, BATCHSIZE*8)
         # If downsizing does not work, try with the original image 
         if len(trackmat)<5 and max(H,W)<2000:
             trackmat, faces = gettrack(imgls, FPS//4, H, W, BATCHSIZE)
@@ -277,6 +280,7 @@ for tt, batch in enumerate(allloader):
             trackmat[['x1', 'x2']] = (trackmat[['x1', 'x2']]*(W/w)).astype(np.int32)
             trackmat[['y1', 'y2']] = (trackmat[['y1', 'y2']]*(H/h)).astype(np.int32)
         # logger.info(trackmat)
+        #logger.info('CUDA complete {} : {}'.format(tt, VNAME.split('/')[-1]))
         trackmat[['x1', 'x2']] = trackmat[['x1', 'x2']].clip(0, W)
         trackmat[['y1', 'y2']] = trackmat[['y1', 'y2']].clip(0, H)
         #logger.info(trackmat)
@@ -303,11 +307,14 @@ for tt, batch in enumerate(allloader):
         trackvid = trackvid.sort_values(['obj', 'frame'], 0).reset_index(drop=True)
         N_OBJ, N_FACES = len(trackvid.obj.unique()), len(trackvid)
         trackls.append(trackvid)
+        #logger.info('PANDAS complete {} : {}'.format(tt, VNAME.split('/')[-1]))
         np.savez_compressed(os.path.join(OUTDIR, VNAME.split('/')[-1].replace('mp4', 'npz')), trackfaces)
+        #logger.info('DISK SAVE complete {} : {}'.format(tt, VNAME.split('/')[-1]))
         END = datetime.datetime.now()
         STATUS = 'sucess'
     except Exception:
         logger.exception("Fatal error in main loop")
+        logger.info('Failed image {} : {}'.format(tt, VNAME.split('/')[-1]))
         END = datetime.datetime.now()
         N_OBJ, N_FACES = 0, 0
         STATUS = 'fail'

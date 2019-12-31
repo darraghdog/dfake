@@ -35,7 +35,7 @@ def logshape(df, logger=logger):
 
 
 BSIZE=64
-NPPATH = os.path.join(INPATH, 'data/npimg08')
+NPPATH = os.path.join(INPATH, 'data/mount/npimg08')
 device=torch.device('cuda')
 
 metadf = pd.read_csv(os.path.join(INPATH, 'data/trainmeta.csv.gz'))
@@ -53,12 +53,13 @@ logshape(metadf)
 
 
 logger.info('get the different obejcts per video')
-trackfiles = glob.glob(os.path.join(INPATH, 'data/npimg08/tracker_fold*'))
+trackfiles = glob.glob(os.path.join(NPPATH, 'tracker_fold*'))
 trackdf = [pd.read_csv(i) for i in trackfiles]
 trackdf = [d.loc[~d[['obj', 'video']].duplicated()] for d in trackdf]
 trackdf = pd.concat(trackdf)
 trackdf = trackdf[trackdf.video.isin(metadf.video)].reset_index(drop=True)
-trackdf = trackdf[['video', 'obj', 'frame']]
+trackdf['objseq'] =  trackdf.groupby(['video', 'obj']).cumcount()
+trackdf = trackdf[['video', 'obj', 'frame', 'objseq']]
 logshape(trackdf)
 
 
@@ -73,18 +74,21 @@ logger.info('Load Numpy arrays and get embeddings')
 batch = []
 embls = []
 idxls = []
+trackdf = trackdf[:200]
 DIM = trackdf.index.max()
 for t, row in trackdf.iterrows():
-    video, obj, frame = row
+    video, obj, frame, objid = row
     try:
         frames = np.load(os.path.join(NPPATH, video.replace('.mp4','.npz')))['arr_0']
-        batch .append( frames[frame])
-    except:
-        continue
+        batch .append( frames[objid])
+    except Exception:
+        logger.exception('Fatal error...')
     idxls.append(t)
     if (t%BSIZE==BSIZE-1) or t == DIM:
+        logger.info('Batch {} len {}'.format(int(t/BSIZE), len(batch)))
         batch = (np.array(batch)- 127.5) * 0.0078125
         batch = torch.tensor(batch).permute(0, 3,1,2).to(dtype=torch.float32)
+        batch = batch.to(device)
         emb = resnet(batch)
         embls.append(emb.detach().cpu().numpy())        
         batch = []

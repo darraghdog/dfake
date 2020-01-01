@@ -165,7 +165,7 @@ In this dataset, no video was subjected to more than one augmentation.
 def snglaugfn():
     rot = random.randrange(-10, 10)
     dim1 = random.uniform(0.7, 1.0)
-    dim2 = random.randrange(SIZE//2, SIZE)
+    dim2 = random.randrange(SIZE//3, SIZE)
     return Compose([
         ShiftScaleRotate(p=1.0, rotate_limit=(rot,rot)),
         CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=1.0), 
@@ -193,7 +193,6 @@ val_transforms = Compose([
     JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
 
-
 transform_norm = Compose([
     JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
@@ -205,7 +204,7 @@ class DFakeDataset(Dataset):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = os.listdir(IMGDIR)
+        self.framels = os.listdir(imgdir)
         self.labels = labels
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\

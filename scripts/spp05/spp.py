@@ -228,11 +228,17 @@ class DFakeDataset(Dataset):
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
             frames = np.load(fname)['arr_0']
+            d0,d1,d2,d3 = frames.shape
+            # Cut the frames to max 37 with a sliding window
+            if d0>self.maxlen:
+                xtra = frames.shape[0]-self.maxlen
+                shift = random.randint(0, xtra)
+                frames = frames[xtra-shift:xtra-shift+self.maxlen]
+            d0,d1,d2,d3 = frames.shape
             augsngl = self.snglaug
             # Standard augmentation on each image
             augfn = self.snglaug()
             frames = np.stack([augfn(image=f)['image'] for f in frames])
-            d0,d1,d2,d3 = frames.shape
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:
                 augmented = self.transform(image=frames)
@@ -240,11 +246,6 @@ class DFakeDataset(Dataset):
             augmented = self.norm(image=frames)
             frames = augmented['image']
             frames = frames.resize_(d0,d1,d2,d3)
-            # Cut the frames to max 37 with a sliding window
-            if d0>self.maxlen:
-                xtra = frames.shape[0]-self.maxlen
-                shift = random.randint(0, xtra)
-                frames = frames[xtra-shift:-shift]
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    

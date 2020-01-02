@@ -190,12 +190,13 @@ trn_transforms = Compose([
     IAAAdditiveGaussianNoise(p=0.2),
     ])
 val_transforms = Compose([
-    JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
+    NoOp(), 
+    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
 
 
 transform_norm = Compose([
-    JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
+    #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
     ToTensor()
     ])
@@ -353,8 +354,14 @@ for epoch in range(EPOCHS):
         with torch.no_grad():
             for step, batch in enumerate(valloader):
                 x = batch['frames'].to(device, dtype=torch.float)
+                #logger.info(50*'-')
+                #logger.info(x.shape)
+                #logger.info(x.mean())
+                #logger.info(x.std())
+                #logger.info(50*'-')
                 out = model(x)
                 out = torch.sigmoid(out)
+                logger.info(out.cpu().detach().numpy().flatten())
                 ypredval.append(out.cpu().detach().numpy())
                 valids.append(batch['ids'].cpu().detach().numpy())
                 if step%200==0:

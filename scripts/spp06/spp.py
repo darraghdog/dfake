@@ -167,9 +167,9 @@ def snglaugfn():
     dim1 = random.uniform(0.7, 1.0)
     dim2 = random.randrange(SIZE//3, SIZE)
     return Compose([
-        ShiftScaleRotate(p=1.0, rotate_limit=(rot,rot)),
-        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=1.0), 
-        Resize(dim2, dim2, interpolation=1,  p=1),
+        ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
+        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
+        Resize(dim2, dim2, interpolation=1,  p=0.5),
         Resize(SIZE, SIZE, interpolation=1,  p=1),
         ])
 
@@ -181,15 +181,16 @@ trn_transforms = Compose([
     RandomContrast(p=0.3),
     RandomBrightness(p=0.3),
     #ShiftScaleRotate(p=0.5, rotate_limit=10, scale_limit=0.15),
-    JpegCompression(quality_lower=20, quality_upper=100, p=1.0),
+    JpegCompression(quality_lower=50, quality_upper=80, p=0.5),
     HueSaturationValue(p=0.3),
     Blur(blur_limit=30, p=0.3),
-    ToGray(p=0.05),
-    ToSepia(p=0.05),
+    #ToGray(p=0.05),
+    #ToSepia(p=0.05),
     MultiplicativeNoise(multiplier=1.5, p=0.3),
     IAAAdditiveGaussianNoise(p=0.2),
     ])
 val_transforms = Compose([
+    NoOp(),
     #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
 
@@ -229,6 +230,7 @@ class DFakeDataset(Dataset):
         try:
             frames = np.load(fname)['arr_0']
             # Cut the frames to max 37 with a sliding window
+            d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
                 xtra = frames.shape[0]-self.maxlen
                 shift = random.randint(0, xtra)

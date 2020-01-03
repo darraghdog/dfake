@@ -165,7 +165,7 @@ In this dataset, no video was subjected to more than one augmentation.
 def snglaugfn():
     rot = random.randrange(-10, 10)
     dim1 = random.uniform(0.7, 1.0)
-    dim2 = random.randrange(SIZE//3, SIZE)
+    dim2 = random.randrange(SIZE//2, SIZE)
     return Compose([
         ShiftScaleRotate(p=1.0, rotate_limit=(rot,rot)),
         CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=1.0), 
@@ -190,8 +190,10 @@ trn_transforms = Compose([
     IAAAdditiveGaussianNoise(p=0.2),
     ])
 val_transforms = Compose([
+    NoOp(), 
     #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
+
 
 transform_norm = Compose([
     #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
@@ -204,11 +206,11 @@ class DFakeDataset(Dataset):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = os.listdir(imgdir)
+        self.framels = ['awnwkrqibf.npz', 'aapnvogymq.npz', 'anpuvshzoo.npz', 'azpuxunqyo.npz'] # os.listdir(IMGDIR)[:32] #['aapnvogymq.npz', 'aagfhgtpmv.npz']# os.listdir(IMGDIR)
         self.labels = labels
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
-        self.data = pd.concat([self.data.query('label == 0')]*5+\
-                               [self.data.query('label == 1')])
+        #self.data = pd.concat([self.data.query('label == 0')]*5+\
+        #                       [self.data.query('label == 1')])
         self.data = self.data.sample(frac=1).reset_index(drop=True)
         # self.data = pd.concat([ self.data[self.data.video.str.contains('qirlrtrxba')],  self.data[:500].copy() ]).reset_index(drop=True)
         self.maxlen = maxlen
@@ -227,19 +229,20 @@ class DFakeDataset(Dataset):
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
-            frames = np.load(fname)['arr_0']
+            frames = np.load(fname)['arr_0'][:32]
+            logger.info(vid['video'])
+            logger.info([xxx.mean() for xxx in frames[-4:]])
+            d0,d1,d2,d3 = frames.shape
             # Cut the frames to max 37 with a sliding window
-            if self.train and (d0>self.maxlen):
+            if d0>self.maxlen:
                 xtra = frames.shape[0]-self.maxlen
                 shift = random.randint(0, xtra)
                 frames = frames[xtra-shift:xtra-shift+self.maxlen]
-            else:
-                frames = frames[:self.maxlen]
             d0,d1,d2,d3 = frames.shape
             augsngl = self.snglaug
             # Standard augmentation on each image
             augfn = self.snglaug()
-            if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
+            #frames = np.stack([augfn(image=f)['image'] for f in frames])
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:
                 augmented = self.transform(image=frames)
@@ -247,6 +250,7 @@ class DFakeDataset(Dataset):
             augmented = self.norm(image=frames)
             frames = augmented['image']
             frames = frames.resize_(d0,d1,d2,d3)
+            logger.info([xxx.mean() for xxx in frames[-4:]])
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    
@@ -280,8 +284,8 @@ def collatefn(batch):
 logger.info('Create loaders...')
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
 # BATCHSIZE=2
-trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
-valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
+trndf = metadf#.query('fold != @FOLD').reset_index(drop=True)
+valdf = metadf#.query('fold == @FOLD').reset_index(drop=True)
 
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
@@ -352,19 +356,25 @@ for epoch in range(EPOCHS):
         valids = [] 
         with torch.no_grad():
             for step, batch in enumerate(valloader):
+                logger.info([[xxx.mean() for xxx in xx[-4:]] for xx in batch['frames']])
                 x = batch['frames'].to(device, dtype=torch.float)
+                logger.info(50*'-')
+                logger.info(x.shape)
+                logger.info(x.mean())
+                logger.info(x.std())
+                logger.info(50*'-')
                 out = model(x)
                 out = torch.sigmoid(out)
+                logger.info(out.cpu().detach().numpy().flatten())
                 ypredval.append(out.cpu().detach().numpy())
                 valids.append(batch['ids'].cpu().detach().numpy())
                 if step%200==0:
                     logger.info('Val step {} of {}'.format(step, len(valloader)))    
-        ypredval = np.concatenate(ypredval).flatten()
-        valids = np.concatenate(valids).flatten()
-        yactval = valdataset.data.iloc[valids].label.values
-        for c in [.2, .1, .01, .001] :
-            valloss = log_loss(yactval, ypredval.clip(c,1-c))
-            logger.info('Epoch {} val; clip {} logloss {:.5f}'.format(epoch,c, valloss))
+        #ypredval = np.concatenate(ypredval).flatten()
+        #valids = np.concatenate(valids).flatten()
+        #yactval = valdataset.data.iloc[valids].label.values
+        #valloss = log_loss(yactval, ypredval.clip(.00001,.99999))
+        #logger.info('Epoch {} val logloss {:.5f}'.format(epoch, valloss))
     
 logger.info('Write out bagged prediction to preds folder')
 yvaldf = valdataset.data.iloc[valids][['video', 'label']]

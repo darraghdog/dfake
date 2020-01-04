@@ -1,5 +1,5 @@
 N_GPU=1
-WDIR='spp06'
+WDIR='spp08'
 FOLD=0
 SIZE='224'
 ACCUM=1

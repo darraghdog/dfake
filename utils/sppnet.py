@@ -85,23 +85,24 @@ class SPPNet(nn.Module):
                  pool_size=(1, 2, 6), pretrained=False):
         # Only resnet is supported in this version
         super(SPPNet, self).__init__()
-        if architecture == 'resnet':
+        self.arch = architecture
+        if self.arch == 'resnet':
             if backbone in [18, 34, 50, 101, 152]:
                 self.model = ResNet(backbone, num_class, pretrained, folder)
-                self.model.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(architecture, backbone))))
+                self.model.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))))
             else:
-                raise ValueError('{}{} is not supported yet.'.format(architecture, backbone))
+                raise ValueError('{}{} is not supported yet.'.format(self.arch, backbone))
 
             backbones = {18:512, 34:512, 50:2048, 101:2048, 152:2048}
             self.c = backbones[backbone]
                 
-        elif  architecture == 'densenet':
+        elif  self.arch == 'densenet':
             if backbone in [121, 169, 201]:
-                ckpt = os.path.join(folder, '{}{}.pth'.format(architecture, backbone))
+                ckpt = os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))
                 self.model = DensNet(ckpt = ckpt, layers=backbone, num_class=num_class, pretrained=pretrained)
-                # self.resnet.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(architecture, backbone))))
+                # self.resnet.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))))
             else:
-                raise ValueError('{}{} is not supported yet.'.format(architecture, backbone))
+                raise ValueError('{}{} is not supported yet.'.format(self.arch, backbone))
                 
             backbones = {121:1024, 169:1664, 201:1920}
             self.c = backbones[backbone]
@@ -111,9 +112,9 @@ class SPPNet(nn.Module):
         #self.classifier = nn.Linear(num_features, num_class)
 
     def forward(self, x):
-        if architecture == 'resnet':
+        if self.arch == 'resnet':
             _, _, _, x = self.model.conv_base(x)
-        elif architecture == 'densenet':
+        elif self.arch == 'densenet':
             features = self.features(x)
             x = F.relu(features, inplace=True)
         x = self.spp(x)

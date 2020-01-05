@@ -1,0 +1,148 @@
+Sender: LSF System <lsfadmin@dbslp1897>
+Subject: Job 55658: <sh -c "cd /share/dhanley2/dfake/scripts/spp09  && python3 spp.py              --wtspath weights  --fold 0  --rootpath /share/dhanley2/dfake/ --metafile trainmeta.csv.gz              --accum 1 --lrgamma 0.8 --start 0 --imgpath data/mount/npimg08 --size 224 --batchsize 16 --lr 0.00001             --start 0 --epochs 15"> in cluster <osfi_hpc> Exited
+
+Job <sh -c "cd /share/dhanley2/dfake/scripts/spp09  && python3 spp.py              --wtspath weights  --fold 0  --rootpath /share/dhanley2/dfake/ --metafile trainmeta.csv.gz              --accum 1 --lrgamma 0.8 --start 0 --imgpath data/mount/npimg08 --size 224 --batchsize 16 --lr 0.00001             --start 0 --epochs 15"> was submitted from host <dbslp1204> by user <dhanley2> in cluster <osfi_hpc> at Sun Jan  5 13:04:53 2020
+Job was executed on host(s) <dbslp1897>, in queue <low2>, as user <dhanley2> in cluster <osfi_hpc> at Sun Jan  5 13:04:53 2020
+</home/dhanley2> was used as the home directory.
+</mnt/lsf/share/dhanley2/dfake/scripts/spp09> was used as the working directory.
+Started at Sun Jan  5 13:04:53 2020
+Terminated at Sun Jan  5 13:05:22 2020
+Results reported at Sun Jan  5 13:05:22 2020
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+sh -c "cd /share/dhanley2/dfake/scripts/spp09  && python3 spp.py              --wtspath weights  --fold 0  --rootpath /share/dhanley2/dfake/ --metafile trainmeta.csv.gz              --accum 1 --lrgamma 0.8 --start 0 --imgpath data/mount/npimg08 --size 224 --batchsize 16 --lr 0.00001             --start 0 --epochs 15"
+------------------------------------------------------------
+
+Exited with exit code 1.
+
+Resource usage summary:
+
+    CPU time :                                   85.23 sec.
+    Max Memory :                                 4853 MB
+    Average Memory :                             1928.50 MB
+    Total Requested Memory :                     -
+    Delta Memory :                               -
+    Max Swap :                                   -
+    Max Processes :                              14
+    Max Threads :                                524
+    Run time :                                   31 sec.
+    Turnaround time :                            29 sec.
+
+The output (if any) follows:
+
+
+=============
+== PyTorch ==
+=============
+
+NVIDIA Release 19.09 (build 7911588)
+PyTorch Version 1.2.0a0+afb7a16
+
+Container image Copyright (c) 2019, NVIDIA CORPORATION.  All rights reserved.
+
+Copyright (c) 2014-2019 Facebook Inc.
+Copyright (c) 2011-2014 Idiap Research Institute (Ronan Collobert)
+Copyright (c) 2012-2014 Deepmind Technologies    (Koray Kavukcuoglu)
+Copyright (c) 2011-2012 NEC Laboratories America (Koray Kavukcuoglu)
+Copyright (c) 2011-2013 NYU                      (Clement Farabet)
+Copyright (c) 2006-2010 NEC Laboratories America (Ronan Collobert, Leon Bottou, Iain Melvin, Jason Weston)
+Copyright (c) 2006      Idiap Research Institute (Samy Bengio)
+Copyright (c) 2001-2004 Idiap Research Institute (Ronan Collobert, Samy Bengio, Johnny Mariethoz)
+Copyright (c) 2015      Google Inc.
+Copyright (c) 2015      Yangqing Jia
+Copyright (c) 2013-2016 The Caffe contributors
+All rights reserved.
+
+Various files include modifications (c) NVIDIA CORPORATION.  All rights reserved.
+NVIDIA modifications are covered by the license terms that apply to the underlying project or file.
+
+NOTE: Legacy NVIDIA Driver detected.  Compatibility mode ENABLED.
+
+NOTE: Detected MOFED driver 4.3-1.0.1; version automatically updated.
+
+/opt/conda/lib/python3.6/site-packages/sklearn/utils/linear_assignment_.py:21: DeprecationWarning: The linear_assignment_ module is deprecated in 0.21 and will be removed from 0.23. Use scipy.optimize.linear_sum_assignment instead.
+  DeprecationWarning)
+2020-01-05 13:05:00,006 - Video to image : - INFO - Device : Tesla V100-SXM2-16GB
+2020-01-05 13:05:00,007 - Video to image : - INFO - Cuda available : True
+2020-01-05 13:05:00,007 - Video to image : - INFO - Cuda n_gpus : 1
+2020-01-05 13:05:00,007 - Video to image : - INFO - Load params
+2020-01-05 13:05:00,007 - Video to image : - INFO - seed                1234
+2020-01-05 13:05:00,007 - Video to image : - INFO - fold                0
+2020-01-05 13:05:00,007 - Video to image : - INFO - rootpath            /share/dhanley2/dfake/
+2020-01-05 13:05:00,007 - Video to image : - INFO - vidpath             data/mount/video/train
+2020-01-05 13:05:00,007 - Video to image : - INFO - imgpath             data/mount/npimg08
+2020-01-05 13:05:00,007 - Video to image : - INFO - wtspath             weights
+2020-01-05 13:05:00,007 - Video to image : - INFO - fps                 8
+2020-01-05 13:05:00,007 - Video to image : - INFO - size                224
+2020-01-05 13:05:00,007 - Video to image : - INFO - metafile            trainmeta.csv.gz
+2020-01-05 13:05:00,007 - Video to image : - INFO - batchsize           16
+2020-01-05 13:05:00,007 - Video to image : - INFO - epochs              15
+2020-01-05 13:05:00,007 - Video to image : - INFO - lr                  0.00001
+2020-01-05 13:05:00,007 - Video to image : - INFO - decay               0.0
+2020-01-05 13:05:00,007 - Video to image : - INFO - lrgamma             0.8
+2020-01-05 13:05:00,007 - Video to image : - INFO - start               0
+2020-01-05 13:05:00,007 - Video to image : - INFO - infer               TRN
+2020-01-05 13:05:00,007 - Video to image : - INFO - accum               1
+2020-01-05 13:05:00,187 - Video to image : - INFO - Full video file shape 119154 7
+2020-01-05 13:05:00,188 - Video to image : - INFO - Create loaders...
+2020-01-05 13:05:01,394 - Video to image : - INFO - Expand the REAL class 152464 7
+2020-01-05 13:05:01,509 - Video to image : - INFO - Expand the REAL class 42702 7
+2020-01-05 13:05:01,509 - Video to image : - INFO - Create model
+2020-01-05 13:05:10,156 - Video to image : - INFO - Epoch 0/14
+2020-01-05 13:05:10,156 - Video to image : - INFO - ----------
+Selected optimization level O1:  Insert automatic casts around Pytorch functions and Tensor methods.
+
+Defaults for this optimization level are:
+enabled                : True
+opt_level              : O1
+cast_model_type        : None
+patch_torch_functions  : True
+keep_batchnorm_fp32    : None
+master_weights         : None
+loss_scale             : dynamic
+Processing user overrides (additional kwargs that are not None)...
+After processing overrides, optimization options are:
+enabled                : True
+opt_level              : O1
+cast_model_type        : None
+patch_torch_functions  : True
+keep_batchnorm_fp32    : None
+master_weights         : None
+loss_scale             : dynamic
+Traceback (most recent call last):
+  File "spp.py", line 365, in <module>
+    out = model(x)
+  File "/opt/conda/lib/python3.6/site-packages/torch/nn/modules/module.py", line 547, in __call__
+    result = self.forward(*input, **kwargs)
+  File "spp.py", line 137, in forward
+    emb = self.sppnet(x.permute(0,3,1,2))
+  File "/opt/conda/lib/python3.6/site-packages/torch/nn/modules/module.py", line 547, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/share/dhanley2/dfake/utils/sppnet.py", line 118, in forward
+    features = self.model.features(x)
+  File "/opt/conda/lib/python3.6/site-packages/torch/nn/modules/module.py", line 547, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/nn/modules/container.py", line 92, in forward
+    input = module(input)
+  File "/opt/conda/lib/python3.6/site-packages/torch/nn/modules/module.py", line 547, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torchvision/models/densenet.py", line 74, in forward
+    new_features = layer(*features)
+  File "/opt/conda/lib/python3.6/site-packages/torch/nn/modules/module.py", line 547, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torchvision/models/densenet.py", line 50, in forward
+    bottleneck_output = bn_function(*prev_features)
+  File "/opt/conda/lib/python3.6/site-packages/torchvision/models/densenet.py", line 23, in bn_function
+    bottleneck_output = conv(relu(norm(concated_features)))
+  File "/opt/conda/lib/python3.6/site-packages/torch/nn/modules/module.py", line 547, in __call__
+    result = self.forward(*input, **kwargs)
+  File "/opt/conda/lib/python3.6/site-packages/torch/nn/modules/conv.py", line 343, in forward
+    return self.conv2d_forward(input, self.weight)
+  File "/opt/conda/lib/python3.6/site-packages/torch/nn/modules/conv.py", line 340, in conv2d_forward
+    self.padding, self.dilation, self.groups)
+  File "/opt/conda/lib/python3.6/site-packages/apex/amp/wrap.py", line 28, in wrapper
+    return orig_fn(*new_args, **kwargs)
+RuntimeError: CUDA out of memory. Tried to allocate 1.44 GiB (GPU 0; 15.75 GiB total capacity; 13.13 GiB already allocated; 718.19 MiB free; 900.43 MiB cached)

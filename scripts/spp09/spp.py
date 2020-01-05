@@ -116,12 +116,12 @@ metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
-class SPPSeqNet(nn.Module):
-    def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
-                 dense_units = 256, dropout = 0.2):
+class SPPSeq(nn.Module):
+    def __init__(self, architecture, backbone, embed_size, pool_size=(1, 2, 6), \
+                 pretrained=True, dense_units = 256, dropout = 0.2):
         # Only resnet is supported in this version
-        super(SPPSeqNet, self).__init__()
-        self.sppnet = SPPNet(backbone=34, pool_size=pool_size, folder=WTSPATH)
+        super(SPPSeq, self).__init__()
+        self.sppnet = SPPNet(architecture=architecture, backbone=backbone, pool_size=pool_size, folder=WTSPATH)
         self.dense_units = dense_units
         self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
@@ -150,7 +150,6 @@ class SPPSeqNet(nn.Module):
         # Classifier
         out = self.linear_out(hidden)
         return out
-
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
 # https://www.kaggle.com/alexanderliao/image-augmentation-demo-with-albumentation/notebook
 # https://albumentations.readthedocs.io/en/latest/augs_overview/image_only/image_only.html#blur

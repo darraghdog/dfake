@@ -349,6 +349,7 @@ model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
 # model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
 
+ypredvalls = []
 for epoch in range(EPOCHS):
     logger.info('Epoch {}/{}'.format(epoch, EPOCHS - 1))
     logger.info('-' * 10)
@@ -402,10 +403,16 @@ for epoch in range(EPOCHS):
                     logger.info('Val step {} of {}'.format(step, len(valloader)))    
         ypredval = np.concatenate(ypredval).flatten()
         valids = np.concatenate(valids).flatten()
+        ypredvalls.append(ypredval)
         yactval = valdataset.data.iloc[valids].label.values
-        for c in [.2, .1, .01, .001] :
+        for c in [.1, .01, .001] :
             valloss = log_loss(yactval, ypredval.clip(c,1-c))
-            logger.info('Epoch {} val; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
+            logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
+        for c in [.1, .01, .001] :
+            BAGS=3
+            ypredvalbag = sum(ypredvalls[:BAGS])/len(ypredvalls[:BAGS])
+            valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
+            logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
     
 logger.info('Write out bagged prediction to preds folder')
 yvaldf = valdataset.data.iloc[valids][['video', 'label']]

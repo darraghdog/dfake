@@ -115,7 +115,7 @@ class SPPNet(nn.Module):
         if self.arch == 'resnet':
             _, _, _, x = self.model.conv_base(x)
         elif self.arch == 'densenet':
-            features = self.features(x)
+            features = self.model.features(x)
             x = F.relu(features, inplace=True)
         x = self.spp(x)
         # x = self.classifier(x)

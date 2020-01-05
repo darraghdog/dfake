@@ -333,8 +333,12 @@ poolsize=(1, 2, 6)
 # model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
 #                   dropout = 0.2, embed_size = embedsize)
 embedsize = 1024*sum(i**2 for i in poolsize)
-model = SPPSeq(architecture = 'densenet', backbone=121, pool_size=poolsize, dense_units = 256, \
-                  dropout = 0.2, embed_size = embedsize)
+bb=34
+du=256
+do=0.2
+model = SPPSeqNet(backbone=bb, pool_size=poolsize, dense_units = du, \
+                  dropout = do, embed_size = embedsize)
+
 
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
@@ -355,6 +359,9 @@ for epoch in range(EPOCHS):
     logger.info('-' * 10)
     model_file_name = 'weights/sppnet_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
+        del model
+        model = SPPSeqNet(backbone=bb, pool_size=poolsize, dense_units = du, \
+                  dropout = do, embed_size = embedsize)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
         continue
@@ -386,6 +393,9 @@ for epoch in range(EPOCHS):
         torch.save(model.state_dict(), model_file_name)
         scheduler.step()
     else:
+        del model
+        model = SPPSeqNet(backbone=bb, pool_size=poolsize, dense_units = du, \
+                  dropout = do, embed_size = embedsize)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
     if INFER in ['VAL', 'TRN']:

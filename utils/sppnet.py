@@ -51,30 +51,67 @@ class ResNet(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
+    
+class DensNet(nn.Module):
+    # def __init__(self, ckpt, num_classes=2, pretrained=False, folder = None):
+    def __init__(self, ckpt, layers=18, num_class=2, pretrained=False):
+        super().__init__()
+        if layers == 121:
+            preloaded = models.densenet121(pretrained=pretrained)
+        elif layers == 169:
+            preloaded= models.densenet169(pretrained=pretrained)
+        elif layers == 201:
+            preloaded = models.densenet201(pretrained=pretrained)
+
+        # preloaded = models.densenet121(pretrained)
+        preloaded.load_state_dict(torch.load( ckpt ))
+
+        self.features = preloaded.features
+        # self.features.conv0 = nn.Conv2d(num_channels, 64, 7, 2, 3)
+        self.classifier = nn.Linear(1024, num_class, bias=True)
+        del preloaded
+        
+    def forward(self, x):
+        features = self.features(x)
+        out = F.relu(features, inplace=True)
+        out = F.adaptive_avg_pool2d(out, (1, 1)).view(features.size(0), -1)
+        out = self.classifier(out)
+        return out
 
 # torch.load(os.path.join(folder, 'resnet{}.pth'.format(backbone)))
 
 class SPPNet(nn.Module):
-    def __init__(self, folder, backbone=101, num_class=2, pool_size=(1, 2, 6), pretrained=False):
+    def __init__(self, folder, architecture = 'resnet', backbone=50, num_class=2, \
+                 pool_size=(1, 2, 6), pretrained=False):
         # Only resnet is supported in this version
         super(SPPNet, self).__init__()
-        if backbone in [18, 34, 50, 101, 152]:
-            self.resnet = ResNet(backbone, num_class, pretrained, folder)
-            self.resnet.load_state_dict(torch.load(  os.path.join(folder, 'resnet{}.pth'.format(backbone))  ))
-        else:
-            raise ValueError('Resnet{} is not supported yet.'.format(backbone))
+        if architecture == 'resnet':
+            if backbone in [18, 34, 50, 101, 152]:
+                self.model = ResNet(backbone, num_class, pretrained, folder)
+                self.model.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(architecture, backbone))))
+            else:
+                raise ValueError('{}{} is not supported yet.'.format(architecture, backbone))
 
-        if backbone in [18, 34]:
-            self.c = 512
-        if backbone in [50, 101, 152]:
-            self.c = 2048
+            backbones = {18:512, 34:512, 50:2048, 101:2048, 152:2048}
+            self.c = backbones[backbone]
+                
+        elif  architecture == 'densenet':
+            if backbone in [121, 169, 201]:
+                ckpt = os.path.join(folder, '{}{}.pth'.format(architecture, backbone))
+                self.model = DensNet(ckpt = ckpt, layers=backbone, num_class=num_class, pretrained=pretrained)
+                # self.resnet.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(architecture, backbone))))
+            else:
+                raise ValueError('{}{} is not supported yet.'.format(architecture, backbone))
+                
+            backbones = {121:1024, 169:1664, 201:1920}
+            self.c = backbones[backbone]
 
         self.spp = SpatialPyramidPool2D(out_side=pool_size)
         #num_features = self.c * (pool_size[0] ** 2 + pool_size[1] ** 2 + pool_size[2] ** 2)
         #self.classifier = nn.Linear(num_features, num_class)
 
     def forward(self, x):
-        _, _, _, x = self.resnet.conv_base(x)
+        _, _, _, x = self.model.conv_base(x)
         x = self.spp(x)
         # x = self.classifier(x)
         return x

@@ -111,7 +111,11 @@ class SPPNet(nn.Module):
         #self.classifier = nn.Linear(num_features, num_class)
 
     def forward(self, x):
-        _, _, _, x = self.model.conv_base(x)
+        if architecture == 'resnet':
+            _, _, _, x = self.model.conv_base(x)
+        elif architecture == 'densenet':
+            features = self.features(x)
+            x = F.relu(features, inplace=True)
         x = self.spp(x)
         # x = self.classifier(x)
         return x

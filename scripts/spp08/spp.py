@@ -324,7 +324,7 @@ valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_work
 logger.info('Create model')
 poolsize=(1, 2, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
-model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
+model = SPPSeqNet(backbone=34, pool_size=poolsize, dense_units = 256, \
                   dropout = 0.2, embed_size = embedsize)
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
@@ -338,7 +338,7 @@ scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
 
-
+ypredvalls = []
 for epoch in range(EPOCHS):
     logger.info('Epoch {}/{}'.format(epoch, EPOCHS - 1))
     logger.info('-' * 10)
@@ -392,14 +392,19 @@ for epoch in range(EPOCHS):
                     logger.info('Val step {} of {}'.format(step, len(valloader)))    
         ypredval = np.concatenate(ypredval).flatten()
         valids = np.concatenate(valids).flatten()
+        ypredvalls.append(ypredval)
         yactval = valdataset.data.iloc[valids].label.values
-        for c in [.2, .1, .01, .001] :
+        for c in [.1, .01, .001] :
             valloss = log_loss(yactval, ypredval.clip(c,1-c))
-            logger.info('Epoch {} val; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
-    
+            logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
+        for c in [.1, .01, .001] :
+            BAGS=3
+            ypredvalbag = sum(ypredvalls[:BAGS])/len(ypredvalls[:BAGS])
+            valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
+            logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
+  
 logger.info('Write out bagged prediction to preds folder')
 yvaldf = valdataset.data.iloc[valids][['video', 'label']]
 yvaldf['pred'] = ypredval 
 yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}.csv.gz'.format(epoch), \
             index = False, compression = 'gzip')
-

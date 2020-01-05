@@ -111,6 +111,13 @@ DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
 
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed(SEED)
+if n_gpu > 0:
+    torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.deterministic = True
+
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
@@ -340,7 +347,7 @@ optimizer = optim.Adam(plist, lr=LR)
 scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
-
+# model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
 
 for epoch in range(EPOCHS):
     logger.info('Epoch {}/{}'.format(epoch, EPOCHS - 1))

@@ -88,8 +88,8 @@ class SPPNet(nn.Module):
         self.arch = architecture
         if self.arch == 'resnet':
             if backbone in [18, 34, 50, 101, 152]:
-                self.model = ResNet(backbone, num_class, pretrained, folder)
-                self.model.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))))
+                self.resnet = ResNet(backbone, num_class, pretrained, folder)
+                self.resnet.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))))
             else:
                 raise ValueError('{}{} is not supported yet.'.format(self.arch, backbone))
 
@@ -113,7 +113,7 @@ class SPPNet(nn.Module):
 
     def forward(self, x):
         if self.arch == 'resnet':
-            _, _, _, x = self.model.conv_base(x)
+            _, _, _, x = self.resnet.conv_base(x)
         elif self.arch == 'densenet':
             features = self.model.features(x)
             x = F.relu(features, inplace=True)

@@ -43,8 +43,6 @@ from albumentations import (Cutout, Compose, Normalize, RandomRotate90, Horizont
 import albumentations as A
 from tqdm import tqdm
 from apex import amp
-
-
 from apex.parallel import DistributedDataParallel as DDP
 from apex.fp16_utils import *
 from apex import amp, optimizers
@@ -252,13 +250,7 @@ class DFakeDataset(Dataset):
             dftmp['nppath'] = INPATH + '/' + impath + '/' + dftmp.video.replace('mp4', 'npz')
             self.data.append(dftmp)
         self.data = pd.concat(self.data, 0)
-
-        self.data = df.copy()
-        self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.labels = labels
-        self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
-        self.data = pd.concat([self.data.query('label == 0')]*5+\
-                               [self.data.query('label == 1')])
         self.data = self.data.sample(frac=1).reset_index(drop=True)
         # self.data = pd.concat([ self.data[self.data.video.str.contains('qirlrtrxba')],  self.data[:500].copy() ]).reset_index(drop=True)
         self.maxlen = maxlen
@@ -275,7 +267,7 @@ class DFakeDataset(Dataset):
     def __getitem__(self, idx):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
-        fname = vid.nppath # os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
+        fname = vid.nppath.replace('mp4', 'npz') # os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
             frames = np.load(fname)['arr_0']
             # Cut the frames to max 37 with a sliding window
@@ -339,6 +331,9 @@ valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = Fal
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=8, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
 
+logger.info('Train shape {} {}'.format(*trndf.shape))
+logger.info('Train loader {}'.format(len(trnloader)))
+logger.info('Valid shape {} {}'.format(*valdf.shape))
 
 logger.info('Create model')
 poolsize=(1, 2, 6)
@@ -417,7 +412,7 @@ for epoch in range(EPOCHS):
                 ypredval.append(out.cpu().detach().numpy())
                 valids.append(batch['ids'].cpu().detach().numpy())
                 if step%200==0:
-                    logger.info('Val step {} of {}'.format(step, 1len(valloader)))    
+                    logger.info('Val step {} of {}'.format(step, len(valloader)))    
                 del x, out, batch
         ypredval = np.concatenate(ypredval).flatten()
         valids = np.concatenate(valids).flatten()

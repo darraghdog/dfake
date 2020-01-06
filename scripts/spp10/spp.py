@@ -242,7 +242,7 @@ class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
 
         self.data = []
-        for impath in self.imgdirs.split('|'):
+        for impath in imgdir.split('|'):
             dftmp = df.copy()
             dftmp.label = (dftmp.label == 'FAKE').astype(np.int8)
             framels = sorted(os.listdir(os.path.join(INPATH, impath)))

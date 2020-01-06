@@ -102,7 +102,7 @@ BATCHSIZE = int(options.batchsize)
 METAFILE = os.path.join(INPATH, 'data', options.metafile)
 WTSFILES = os.path.join(INPATH, options.wtspath)
 WTSPATH = os.path.join(INPATH, options.wtspath)
-IMGDIR = os.path.join(INPATH, options.imgpath)
+IMGDIR = options.imgpath
 EPOCHS = int(options.epochs)
 START = int(options.start)
 LR=float(options.lr)
@@ -111,6 +111,7 @@ DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
 
+SEED = int(options.seed)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed(SEED)
@@ -124,11 +125,11 @@ logger.info('Full video file shape {} {}'.format(*metadf.shape))
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
-    def __init__(self, architecture, backbone, embed_size, pool_size=(1, 2, 6), \
-                 pretrained=True, dense_units = 256, dropout = 0.2):
+    def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
+                 dense_units = 256, dropout = 0.2):
         # Only resnet is supported in this version
         super(SPPSeqNet, self).__init__()
-        self.sppnet = SPPNet(architecture=architecture, backbone=backbone, pool_size=pool_size, folder=WTSPATH)
+        self.sppnet = SPPNet(backbone=34, pool_size=pool_size, folder=WTSPATH)
         self.dense_units = dense_units
         self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
@@ -157,6 +158,7 @@ class SPPSeqNet(nn.Module):
         # Classifier
         out = self.linear_out(hidden)
         return out
+
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
 # https://www.kaggle.com/alexanderliao/image-augmentation-demo-with-albumentation/notebook
 # https://albumentations.readthedocs.io/en/latest/augs_overview/image_only/image_only.html#blur
@@ -238,10 +240,21 @@ transform_norm = Compose([
     
 class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
+
+        self.data = []
+        for impath in self.imgdirs.split('|'):
+            dftmp = df.copy()
+            dftmp.label = (dftmp.label == 'FAKE').astype(np.int8)
+            framels = sorted(os.listdir(os.path.join(INPATH, impath)))
+            dftmp = dftmp[dftmp.video.str.replace('.mp4', '.npz').isin(framels)]
+            dftmp = pd.concat([dftmp.query('label == 0')]*5+\
+                      [dftmp.query('label == 1')])
+            dftmp['nppath'] = INPATH + '/' + impath + '/' + dftmp.video.replace('mp4', 'npz')
+            self.data.append(dftmp)
+        self.data = pd.concat(self.data, 0)
+
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
-        self.imgdir = imgdir
-        self.framels = os.listdir(imgdir)
         self.labels = labels
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
@@ -262,7 +275,7 @@ class DFakeDataset(Dataset):
     def __getitem__(self, idx):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
-        fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
+        fname = vid.nppath # os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
             frames = np.load(fname)['arr_0']
             # Cut the frames to max 37 with a sliding window
@@ -319,7 +332,7 @@ logger.info('Create loaders...')
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
 # BATCHSIZE=2
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
-valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
+valdf = metadf.query('fold == @FOLD').reset_index(drop=True)#.head(1024)
 
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
@@ -329,17 +342,12 @@ valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_work
 
 logger.info('Create model')
 poolsize=(1, 2, 6)
-# embedsize = 512*sum(i**2 for i in poolsize)
-# model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-#                   dropout = 0.2, embed_size = embedsize)
-embedsize = 1024*sum(i**2 for i in poolsize)
-bb=121
+embedsize = 512*sum(i**2 for i in poolsize)
+bb=34
 du=256
 do=0.2
-arch='densenet'
-model = SPPSeqNet(architecture =arch,  backbone=bb, pool_size=poolsize, dense_units = du, \
+model = SPPSeqNet(backbone=bb, pool_size=poolsize, dense_units = du, \
                   dropout = do, embed_size = embedsize)
-
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -351,7 +359,6 @@ optimizer = optim.Adam(plist, lr=LR)
 scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
-# model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
 
 ypredvalls = []
 for epoch in range(EPOCHS):
@@ -359,8 +366,8 @@ for epoch in range(EPOCHS):
     logger.info('-' * 10)
     model_file_name = 'weights/sppnet_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
-        del model
-        model = SPPSeqNet(architecture =arch, backbone=bb, pool_size=poolsize, dense_units = du, \
+        logger.info('Load checkpoint : {}'.format(model_file_name))
+        model = SPPSeqNet(backbone=bb, pool_size=poolsize, dense_units = du, \
                   dropout = do, embed_size = embedsize)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
@@ -392,13 +399,13 @@ for epoch in range(EPOCHS):
             del x, y, out, batch
         torch.save(model.state_dict(), model_file_name)
         scheduler.step()
-    else:
+    if INFER in ['VAL', 'TRN']:
+        logger.info('Load checkpoint : {}'.format(model_file_name))
         del model
-        model = SPPSeqNet(architecture =arch, backbone=bb, pool_size=poolsize, dense_units = du, \
+        model = SPPSeqNet(backbone=bb, pool_size=poolsize, dense_units = du, \
                   dropout = do, embed_size = embedsize)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
-    if INFER in ['VAL', 'TRN']:
         model.eval()
         ypredval = []
         valids = [] 
@@ -410,23 +417,28 @@ for epoch in range(EPOCHS):
                 ypredval.append(out.cpu().detach().numpy())
                 valids.append(batch['ids'].cpu().detach().numpy())
                 if step%200==0:
-                    logger.info('Val step {} of {}'.format(step, len(valloader)))    
+                    logger.info('Val step {} of {}'.format(step, 1len(valloader)))    
+                del x, out, batch
         ypredval = np.concatenate(ypredval).flatten()
         valids = np.concatenate(valids).flatten()
         ypredvalls.append(ypredval)
         yactval = valdataset.data.iloc[valids].label.values
+        logger.info('Actuals {}'.format(yactval[:8]))
+        logger.info('Preds {}'.format(ypredval[:8]))
+        logger.info('Ids {}'.format(valids[:8]))
         for c in [.1, .01, .001] :
             valloss = log_loss(yactval, ypredval.clip(c,1-c))
             logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
         for c in [.1, .01, .001] :
             BAGS=3
-            ypredvalbag = sum(ypredvalls[:BAGS])/len(ypredvalls[:BAGS])
+            ypredvalbag = sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
-    
+        del yactval, ypredval, valids
+''' 
 logger.info('Write out bagged prediction to preds folder')
 yvaldf = valdataset.data.iloc[valids][['video', 'label']]
 yvaldf['pred'] = ypredval 
 yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}.csv.gz'.format(epoch), \
             index = False, compression = 'gzip')
-
+'''

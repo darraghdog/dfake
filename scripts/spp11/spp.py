@@ -312,8 +312,6 @@ class DFakeDataset(Dataset):
             if self.train or self.val:
                 augmented = self.transform(image=frames)
                 frames = augmented['image']               
-            augmented = self.norm(image=frames)
-            frames = augmented['image']
             
             # Resize to standard batch size and apply clipping
             batchdim = vid.boxgrpmax
@@ -325,9 +323,16 @@ class DFakeDataset(Dataset):
                                                 interpolation=cv2.INTER_LINEAR,  p=1)])
                 augmented = resizeaug(image=frames)
                 frames = augmented['image']
+
+            # Finally normalise
+            augmented = self.norm(image=frames)
+            frames = augmented['image']
+
+            if batchdim!=boxdim:
                 frames = frames.resize_(d0,batchdim,batchdim,d3)
             else:
                 frames = frames.resize_(d0,d1,d2,d3)
+
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    

@@ -120,8 +120,7 @@ torch.backends.cudnn.deterministic = True
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
-
-TRKFILES = glob.glob(os.path.join(IMGDIR, 'track*'))
+TRKFILES = glob.glob(os.path.join(INPATH,IMGDIR) + '/track*')
 trkdf = pd.concat([pd.read_csv(f) for f in TRKFILES], 0)
 trkdf = trkdf[['video', 'boxdim']].drop_duplicates().reset_index(drop=True)
 metadf = pd.merge(metadf, trkdf)

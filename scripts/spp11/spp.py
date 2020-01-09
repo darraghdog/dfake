@@ -304,9 +304,9 @@ class DFakeDataset(Dataset):
             else:
                 frames = frames[:self.maxlen]
             d0,d1,d2,d3 = frames.shape
-            augsngl = self.snglaug
+            #augsngl = self.snglaug
             # Standard augmentation on each image
-            augfn = self.snglaug(d0)
+            augfn = self.snglaug(d1)
             if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:

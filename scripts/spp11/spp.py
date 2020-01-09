@@ -191,16 +191,6 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def snglaugfn():
-    rot = random.randrange(-10, 10)
-    dim1 = random.uniform(0.7, 1.0)
-    dim2 = random.randrange(SIZE//3, SIZE)
-    return Compose([
-        ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
-        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
-        Resize(dim2, dim2, interpolation=cv2.INTER_LINEAR,  p=0.5),
-        Resize(SIZE, SIZE, interpolation=cv2.INTER_LINEAR,  p=1),
-        ])
 
 mean_img = [0.4258249 , 0.31385377, 0.29170314]
 std_img = [0.22613944, 0.1965406 , 0.18660679]
@@ -259,6 +249,18 @@ transform_norm = Compose([
     ToTensor()
     ])
     
+
+def snglaugfn(imgsize):
+    rot = random.randrange(-10, 10)
+    dim1 = random.uniform(0.7, 1.0)
+    # dim2 = random.randrange(imgsize//3, imgsize)
+    return Compose([
+        ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
+        CenterCrop(int(imgsize*dim1), int(imgsize*dim1), always_apply=False, p=0.5), 
+        # Resize(dim2, dim2, interpolation=cv2.INTER_LINEAR,  p=0.5),
+        Resize(imgsize, imgsize, interpolation=cv2.INTER_LINEAR,  p=1),
+        ])
+    
 class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
 
@@ -304,7 +306,7 @@ class DFakeDataset(Dataset):
             d0,d1,d2,d3 = frames.shape
             augsngl = self.snglaug
             # Standard augmentation on each image
-            augfn = self.snglaug()
+            augfn = self.snglaug(d0)
             if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:

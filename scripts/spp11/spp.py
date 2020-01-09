@@ -419,6 +419,7 @@ for epoch in range(EPOCHS):
         model.train()  
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
+            logger.info('Batch shape : {}'.format(x.shape))
             y = batch['labels'].to(device, dtype=torch.float)
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)

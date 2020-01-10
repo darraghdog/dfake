@@ -1,4 +1,5 @@
 import os
+import math
 import sys
 import glob
 import json
@@ -80,7 +81,7 @@ sys.path.append(os.path.join(INPATH, 'utils' ))
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from sort import *
-from sppnet import SPPNet
+from sppnet import SPPNet, ResNet, DensNet
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -149,6 +150,79 @@ def sortDfDim(df, size_clip = 256, bsize = 16):
     df['boxgrpmax'] = df['boxgrpmax'].clip(1, size_clip )
     return df
 
+
+class SPPNet(nn.Module):
+    def __init__(self, folder, architecture = 'resnet', backbone=50, num_class=2, \
+                 pool_size=(1, 2, 6), pretrained=False):
+        # Only resnet is supported in this version
+        super(SPPNet, self).__init__()
+        self.arch = architecture
+        if self.arch == 'resnet':
+            if backbone in [18, 34, 50, 101, 152]:
+                self.resnet = ResNet(backbone, num_class, pretrained, folder)
+                self.resnet.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))))
+            else:
+                raise ValueError('{}{} is not supported yet.'.format(self.arch, backbone))
+
+            backbones = {18:512, 34:512, 50:2048, 101:2048, 152:2048}
+            self.c = backbones[backbone]
+                
+        elif  self.arch == 'densenet':
+            if backbone in [121, 169, 201]:
+                ckpt = os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))
+                self.model = DensNet(ckpt = ckpt, layers=backbone, num_class=num_class, pretrained=pretrained)
+                # self.resnet.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))))
+            else:
+                raise ValueError('{}{} is not supported yet.'.format(self.arch, backbone))
+                
+            backbones = {121:1024, 169:1664, 201:1920}
+            self.c = backbones[backbone]
+
+        self.spp = SpatialPyramidPool2D(out_side=pool_size)
+        #num_features = self.c * (pool_size[0] ** 2 + pool_size[1] ** 2 + pool_size[2] ** 2)
+        #self.classifier = nn.Linear(num_features, num_class)
+
+    def forward(self, x):
+        if self.arch == 'resnet':
+            _, _, _, x = self.resnet.conv_base(x)
+
+            logger.info('*'*50)
+            logger.info(x.shape)
+
+        elif self.arch == 'densenet':
+            features = self.model.features(x)
+            x = F.relu(features, inplace=True)
+        x = self.spp(x)
+        logger.info(x.shape)
+        # x = self.classifier(x)
+        return x
+
+class SpatialPyramidPool2D(nn.Module):
+    """
+    Args:
+        out_side (tuple): Length of side in the pooling results of each pyramid layer.
+    Inputs:
+        - `input`: the input Tensor to invert ([batch, channel, width, height])
+    """
+
+    def __init__(self, out_side):
+        super(SpatialPyramidPool2D, self).__init__()
+        self.out_side = out_side
+
+    def forward(self, x):
+        # batch_size, c, h, w = x.size()
+        out = None
+        for n in self.out_side:
+            w_r, h_r = map(lambda s: math.ceil(s / n), x.size()[2:])  # Receptive Field Size
+            s_w, s_h = map(lambda s: math.floor(s / n), x.size()[2:])  # Stride
+            max_pool = nn.MaxPool2d(kernel_size=(w_r, h_r), stride=(s_w, s_h))
+            y = max_pool(x)
+            if out is None:
+                out = y.view(y.size()[0], -1)
+            else:
+                out = torch.cat((out, y.view(y.size()[0], -1)), 1)
+        return out
+
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
     def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
@@ -157,7 +231,8 @@ class SPPSeqNet(nn.Module):
         super(SPPSeqNet, self).__init__()
         self.sppnet = SPPNet(backbone=34, pool_size=pool_size, folder=WTSPATH)
         self.dense_units = dense_units
-        self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
+        self.embed_size = embed_size
+        self.lstm1 = nn.LSTM(self.embed_size, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
         self.linear_out = nn.Linear(self.dense_units*2, 1)
         self.embedding_dropout = SpatialDropout(dropout)
@@ -168,7 +243,14 @@ class SPPSeqNet(nn.Module):
         # Flatten to make a single long list of frames
         x = x.view(batch_size * seqlen, *x.size()[2:])
         # Pass each frame thru SPPNet
+        
         emb = self.sppnet(x.permute(0,3,1,2))
+        '''
+        logger.info('*'*50)
+        logger.info((self.embed_size, self.dense_units))
+        logger.info(emb.shape)
+        logger.info(x.shape)
+        '''
         # Split back out to batch
         emb = emb.view(batch_size, seqlen, emb.size()[1])
         emb = self.embedding_dropout(emb)
@@ -315,8 +397,6 @@ class DFakeDataset(Dataset):
             frames = augmented['image']
             frames = frames.resize_(d0,d1,d2,d3)
             '''
-            logger.info(frames.shape)
-            logger.info(type(frames))
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    
@@ -328,16 +408,15 @@ class DFakeDataset(Dataset):
 def collatefn(batch):
     # Remove error reads
     batch = [b for b in batch if b is not None]
-    maxdim = max([b['frames'].shape[1] for b in batch])
+    maxdim = np.array([b['frames'].shape[1] for b in batch]).clip(64, 256).max()
     batchlen = [b['frames'].shape[0]//b['frames'].shape[1] for b in batch]
 
+    
     for d, bl in zip(batch, batchlen):
         if d['frames'].shape[1] != maxdim:
-            d['frames'] = cv2.resize(d['frames'], size=(maxdim, maxdim*bl), interpolation=cv2.INTER_LINEAR) 
-
-        augmented = transform_norm(image=frames)
-        d['frames'] = augmented['image']
-        d['frames'] = d['frames'].resize_(batchlen,maxdim,maxdim,3)
+            d['frames'] = cv2.resize(d['frames'], dsize=(maxdim, maxdim*bl), interpolation=cv2.INTER_LINEAR) 
+        d['frames'] = transform_norm(image=d['frames'])['image']
+        d['frames'] = d['frames'].resize_(bl, maxdim, maxdim, 3)
 
     seqlen = torch.tensor([l['frames'].shape[0] for l in batch])
     ids = torch.tensor([l['idx'] for l in batch])
@@ -364,16 +443,15 @@ logger.info('Create loaders...')
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
 # BATCHSIZE=2
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
-valdf = metadf.query('fold == @FOLD').reset_index(drop=True)#.head(1024)
+valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=8, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
 
-
 logger.info('Create model')
-poolsize=(1, 2, 6)
+poolsize=(1, 2) # 6
 embedsize = 512*sum(i**2 for i in poolsize)
 bb=34
 du=256
@@ -392,21 +470,22 @@ scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
 
+
+
 ypredvalls = []
 for epoch in range(EPOCHS):
     logger.info('Epoch {}/{}'.format(epoch, EPOCHS - 1))
     logger.info('-' * 10)
     model_file_name = 'weights/sppnet_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
 
-    trnsortdf = sortDfDim(trndf, size_clip = SIZE, bsize = 8*16).head(64)#.tail(8).reset_index(drop=True)
-    valsortdf = sortDfDim(valdf, size_clip = SIZE, bsize = 8*16).head(64)
+    trnsortdf = sortDfDim(trndf, size_clip = SIZE, bsize = 64).head(1024)#.tail(8).reset_index(drop=True)
+    valsortdf = sortDfDim(valdf, size_clip = SIZE, bsize = 64).head(1024)
     logger.info(trnsortdf.shape)
     logger.info(trnsortdf.head())
     trndataset = DFakeDataset(trnsortdf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
     valdataset = DFakeDataset(valsortdf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
     trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
     valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
-
 
     if epoch<START:
         logger.info('Load checkpoint : {}'.format(model_file_name))
@@ -422,16 +501,31 @@ for epoch in range(EPOCHS):
             param.requires_grad = True
         model.train()  
         for step, batch in enumerate(trnloader):
-            logger.info(x.shape)
             x = batch['frames'].to(device, dtype=torch.float)
             y = batch['labels'].to(device, dtype=torch.float)
-            logger.info(x.shape)
+            # logger.info(x.shape)
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)
             out = model(x)
             # Get loss
             loss = criterion(out, y)
+            tr_loss += loss.item()
+            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                scaled_loss.backward()
+            if step % ACCUM == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+            if step%100==0:
+                logger.info('Trn step {} of {} trn lossavg {:.5f}'. \
+                        format(step, len(trnloader), (tr_loss/(1+step))))
+            del x, y, out, batch
+        torch.save(model.state_dict(), model_file_name)
+        scheduler.step()
+    if INFER in ['VAL', 'TRN']:
+        logger.info('Load checkpoint : {}'.format(model_file_name))
+        del model
+        model = SPPSeqNet(backbone=bb, pool_size=poolsize, dense_units = du, \
                   dropout = do, embed_size = embedsize)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
@@ -471,3 +565,7 @@ yvaldf['pred'] = ypredval
 yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}.csv.gz'.format(epoch), \
             index = False, compression = 'gzip')
 '''
+
+
+
+

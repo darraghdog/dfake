@@ -43,8 +43,6 @@ from albumentations import (Cutout, Compose, Normalize, RandomRotate90, Horizont
 import albumentations as A
 from tqdm import tqdm
 from apex import amp
-
-
 from apex.parallel import DistributedDataParallel as DDP
 from apex.fp16_utils import *
 from apex import amp, optimizers
@@ -102,7 +100,7 @@ BATCHSIZE = int(options.batchsize)
 METAFILE = os.path.join(INPATH, 'data', options.metafile)
 WTSFILES = os.path.join(INPATH, options.wtspath)
 WTSPATH = os.path.join(INPATH, options.wtspath)
-IMGDIR = os.path.join(INPATH, options.imgpath)
+IMGDIR = options.imgpath
 EPOCHS = int(options.epochs)
 START = int(options.start)
 LR=float(options.lr)
@@ -122,7 +120,30 @@ torch.backends.cudnn.deterministic = True
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
+TRKFILES = glob.glob(os.path.join(INPATH,IMGDIR) + '/track*')
+trkdf = pd.concat([pd.read_csv(f) for f in TRKFILES], 0)
+trkdf = trkdf[['video', 'boxdim']].drop_duplicates().reset_index(drop=True)
+metadf = pd.merge(metadf, trkdf)
+logger.info('Full video file after boxdim added {} {}'.format(*metadf.shape))
 
+
+def sortDfDim(df, size_clip = 256, bsize = 16):  
+    '''
+    Sort the dataframe to get similar sized boxes
+    ''' 
+    max_dim = df.boxdim.max()
+    n_batches = int(np.floor(len(df)/float(bsize)))
+    batch_steps = np.array(random.sample(range(n_batches), n_batches))
+    sorted_ix = df.sort_values('boxdim').index.values
+    batchidx = np.repeat(batch_steps, bsize)
+    loaderidx = sorted_ix[batchidx.argsort()]
+    df = df.iloc[loaderidx].reset_index(drop=True)
+    df['batch'] =     batchidx
+    df['boxgrpmax'] = df.groupby(['batch'])['boxdim'].transform(max)
+    df['boxgrpmax'] = df['boxgrpmax'].clip(1, size_clip )
+    return df
+    
+logger.info(sortDfDim(metadf).head())
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
     def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
@@ -170,16 +191,6 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def snglaugfn():
-    rot = random.randrange(-10, 10)
-    dim1 = random.uniform(0.7, 1.0)
-    dim2 = random.randrange(SIZE//3, SIZE)
-    return Compose([
-        ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
-        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
-        Resize(dim2, dim2, interpolation=1,  p=0.5),
-        Resize(SIZE, SIZE, interpolation=1,  p=1),
-        ])
 
 mean_img = [0.4258249 , 0.31385377, 0.29170314]
 std_img = [0.22613944, 0.1965406 , 0.18660679]
@@ -238,16 +249,33 @@ transform_norm = Compose([
     ToTensor()
     ])
     
+
+def snglaugfn(imgsize):
+    rot = random.randrange(-10, 10)
+    dim1 = random.uniform(0.7, 1.0)
+    # dim2 = random.randrange(imgsize//3, imgsize)
+    return Compose([
+        ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
+        CenterCrop(int(imgsize*dim1), int(imgsize*dim1), always_apply=False, p=0.5), 
+        # Resize(dim2, dim2, interpolation=cv2.INTER_LINEAR,  p=0.5),
+        Resize(imgsize, imgsize, interpolation=cv2.INTER_LINEAR,  p=1),
+        ])
+    
 class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
-        self.data = df.copy()
-        self.data.label = (self.data.label == 'FAKE').astype(np.int8)
-        self.imgdir = imgdir
-        self.framels = sorted(os.listdir(imgdir))
+
+        self.data = []
+        for impath in imgdir.split('|'):
+            dftmp = df.copy()
+            dftmp.label = (dftmp.label == 'FAKE').astype(np.int8)
+            framels = sorted(os.listdir(os.path.join(INPATH, impath)))
+            dftmp = dftmp[dftmp.video.str.replace('.mp4', '.npz').isin(framels)]
+            dftmp = pd.concat([dftmp.query('label == 0')]*5+\
+                      [dftmp.query('label == 1')])
+            dftmp['nppath'] = INPATH + '/' + impath + '/' + dftmp.video.replace('mp4', 'npz')
+            self.data.append(dftmp)
+        self.data = pd.concat(self.data, 0)
         self.labels = labels
-        self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
-        self.data = pd.concat([self.data.query('label == 0')]*5+\
-                               [self.data.query('label == 1')])
         self.data = self.data.sample(frac=1).reset_index(drop=True)
         # self.data = pd.concat([ self.data[self.data.video.str.contains('qirlrtrxba')],  self.data[:500].copy() ]).reset_index(drop=True)
         self.maxlen = maxlen
@@ -262,9 +290,10 @@ class DFakeDataset(Dataset):
         return len(self.data)
     
     def __getitem__(self, idx):
+        # logger.info(idx)
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
-        fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
+        fname = vid.nppath.replace('mp4', 'npz') # os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
             frames = np.load(fname)['arr_0']
             # Cut the frames to max 37 with a sliding window
@@ -276,17 +305,36 @@ class DFakeDataset(Dataset):
             else:
                 frames = frames[:self.maxlen]
             d0,d1,d2,d3 = frames.shape
-            augsngl = self.snglaug
+            #augsngl = self.snglaug
             # Standard augmentation on each image
-            augfn = self.snglaug()
+            augfn = self.snglaug(d1)
             if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:
                 augmented = self.transform(image=frames)
                 frames = augmented['image']               
-            augmented = self.norm(image=frames)
-            frames = augmented['image']
-            frames = frames.resize_(d0,d1,d2,d3)
+            
+            # Resize to standard batch size and apply clipping
+            batchdim = vid.boxgrpmax
+            boxdim = d1
+            #logger.info('Batch {} Dims facedim (np): {} batchgrpmax (df): {} facedim (df): {}'.format(\
+            #            vid.batch, boxdim, batchdim, vid.boxdim))
+            '''
+            if batchdim!=boxdim:
+                resizeaug = A.Compose([A.Resize(d0*batchdim, batchdim, \
+                                                interpolation=cv2.INTER_LINEAR,  p=1)])
+                augmented = resizeaug(image=frames)
+                frames = augmented['image']
+            '''
+            # Finally normalise
+            # frames = self.norm(image=frames)['image']
+            '''
+            if batchdim!=boxdim:
+                frames = frames.resize_(d0,batchdim,batchdim,d3)
+            else:
+            '''
+            # frames = frames.resize(d0,d1,d2,d3)
+            logger.info(frames.shape) 
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    
@@ -294,10 +342,30 @@ class DFakeDataset(Dataset):
                 return {'frames': frames, 'idx': idx}
         except Exception:
             logger.exception('Failed to load numpy array {}'.format(fname))
-               
+
+def batchAlignNorm(frames, new_shape):
+    d1,d2,d3 = frames.shape
+    d0 = int(d1/d2)
+    augfn = A.Compose([A.Resize(new_shape*d0, new_shape, \
+                                    interpolation=cv2.INTER_LINEAR,  p=1)])
+    frames = augfn(image=frames) ['image']
+    frames = transform_norm(image=frames)['image']
+    frames = frames.resize_(d0,new_shape, new_shape ,d3)
+    return frames
+
+           
 def collatefn(batch):
+    logger.info(50*'-')
+
     # Remove error reads
     batch = [b for b in batch if b is not None]
+    dimset = set([b['frames'].shape[1] for b in batch])
+
+    if len(dimset)>1:
+        new_shape = max(dimset)
+        for i in range(len(batch)): 
+            batch[i]['frames'] = batchAlignNorm(batch[i]['frames'], new_shape)
+
     seqlen = torch.tensor([l['frames'].shape[0] for l in batch])
     ids = torch.tensor([l['idx'] for l in batch])
 
@@ -310,7 +378,8 @@ def collatefn(batch):
          torch.cat((l['frames'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
          for l,sl in zip(batch, seqlen)]
     x_batch = torch.cat([x.unsqueeze(0) for x in x_batch])
-    
+    logger.info(x_batch.shape) 
+    logger.info(x_batch[0,0,:5,:5,:])
     if 'labels' in batch[0]:
         y_batch = torch.tensor([l['labels'] for l in batch])
         return {'frames': x_batch, 'ids': ids, 'seqlen': seqlen, 'labels': y_batch}
@@ -323,11 +392,13 @@ logger.info('Create loaders...')
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)#.head(1024)
 
-trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
-valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=8, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
-
+#trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
+#valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
+#trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=8, collate_fn=collatefn)
+#valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
+#logger.info('Train shape {} {}'.format(*trndf.shape))
+#logger.info('Train loader {}'.format(len(trnloader)))
+#logger.info('Valid shape {} {}'.format(*valdf.shape))
 
 logger.info('Create model')
 poolsize=(1, 2, 6)
@@ -335,6 +406,7 @@ embedsize = 512*sum(i**2 for i in poolsize)
 bb=34
 du=256
 do=0.2
+logger.info('Pool size {} Embed Size {}'.format(poolsize, embedsize))
 model = SPPSeqNet(backbone=bb, pool_size=poolsize, dense_units = du, \
                   dropout = do, embed_size = embedsize)
 model = model.to(device)
@@ -350,10 +422,21 @@ model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
 
 ypredvalls = []
+EPOCHS=1
 for epoch in range(EPOCHS):
     logger.info('Epoch {}/{}'.format(epoch, EPOCHS - 1))
     logger.info('-' * 10)
     model_file_name = 'weights/sppnet_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+
+    trnsortdf = sortDfDim(trndf, size_clip = SIZE, bsize = 8*16).head(64)#.tail(8).reset_index(drop=True)
+    valsortdf = sortDfDim(valdf, size_clip = SIZE, bsize = 8*16).head(64)
+    logger.info(trnsortdf.shape)
+    logger.info(trnsortdf.head())
+    trndataset = DFakeDataset(trnsortdf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
+    valdataset = DFakeDataset(valsortdf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
+    trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
+    valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
+    
     if epoch<START:
         logger.info('Load checkpoint : {}'.format(model_file_name))
         model = SPPSeqNet(backbone=bb, pool_size=poolsize, dense_units = du, \
@@ -369,8 +452,8 @@ for epoch in range(EPOCHS):
         model.train()  
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
+            # logger.info('Batch shape : {}'.format(x.shape))
             y = batch['labels'].to(device, dtype=torch.float)
-            logger.info(x.shape)
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)

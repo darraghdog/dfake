@@ -3,6 +3,7 @@ import sys
 import glob
 import json
 import cv2
+import math
 from PIL import Image
 import numpy as np
 import pandas as pd
@@ -80,7 +81,7 @@ sys.path.append(os.path.join(INPATH, 'utils' ))
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from sort import *
-from sppnet import SPPNet
+from sppnet import SPPNet, ResNet, DensNet
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -140,6 +141,77 @@ def sortDfDim(df, size_clip = 256, bsize = 16):
     df['boxgrpmax'] = df.groupby(['batch'])['boxdim'].transform(max)
     df['boxgrpmax'] = df['boxgrpmax'].clip(1, size_clip )
     return df
+
+
+class SPPNet(nn.Module):
+    def __init__(self, folder, architecture = 'resnet', backbone=50, num_class=2, \
+                 pool_size=(1, 2, 6), pretrained=False):
+        # Only resnet is supported in this version
+        super(SPPNet, self).__init__()
+        self.arch = architecture
+        if self.arch == 'resnet':
+            if backbone in [18, 34, 50, 101, 152]:
+                self.resnet = ResNet(backbone, num_class, pretrained, folder)
+                self.resnet.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))))
+            else:
+                raise ValueError('{}{} is not supported yet.'.format(self.arch, backbone))
+
+            backbones = {18:512, 34:512, 50:2048, 101:2048, 152:2048}
+            self.c = backbones[backbone]
+                
+        elif  self.arch == 'densenet':
+            if backbone in [121, 169, 201]:
+                ckpt = os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))
+                self.model = DensNet(ckpt = ckpt, layers=backbone, num_class=num_class, pretrained=pretrained)
+                # self.resnet.load_state_dict(torch.load( os.path.join(folder, '{}{}.pth'.format(self.arch, backbone))))
+            else:
+                raise ValueError('{}{} is not supported yet.'.format(self.arch, backbone))
+                
+            backbones = {121:1024, 169:1664, 201:1920}
+            self.c = backbones[backbone]
+
+        self.spp = SpatialPyramidPool2D(out_side=pool_size)
+        #num_features = self.c * (pool_size[0] ** 2 + pool_size[1] ** 2 + pool_size[2] ** 2)
+        #self.classifier = nn.Linear(num_features, num_class)
+
+    def forward(self, x):
+        if self.arch == 'resnet':
+            _, _, _, x = self.resnet.conv_base(x)
+        elif self.arch == 'densenet':
+            features = self.model.features(x)
+            x = F.relu(features, inplace=True)
+        x = self.spp(x)
+        # x = self.classifier(x)
+        return x
+
+
+class SpatialPyramidPool2D(nn.Module):
+    """
+    Args:
+        out_side (tuple): Length of side in the pooling results of each pyramid layer.
+    Inputs:
+        - `input`: the input Tensor to invert ([batch, channel, width, height])
+    """
+
+    def __init__(self, out_side, scale_fmap = 2):
+        super(SpatialPyramidPool2D, self).__init__()
+        self.out_side = out_side
+        self.upsamplefn = nn.Upsample(scale_factor=scale_fmap, mode='nearest')
+
+    def forward(self, x):
+        x = self.upsamplefn(x)
+        x = self.upsamplefn(x)
+        out = None
+        for n in self.out_side:
+            w_r, h_r = map(lambda s: math.ceil(s / n), x.size()[2:])  # Receptive Field Size
+            s_w, s_h = map(lambda s: math.floor(s / n), x.size()[2:])  # Stride
+            max_pool = nn.MaxPool2d(kernel_size=(w_r, h_r), stride=(s_w, s_h))
+            y = max_pool(x)
+            if out is None:
+                out = y.view(y.size()[0], -1)
+            else:
+                out = torch.cat((out, y.view(y.size()[0], -1)), 1)
+        return out
 
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
@@ -320,7 +392,7 @@ class DFakeDataset(Dataset):
 def collatefn(batch):
     # Remove error reads
     batch = [b for b in batch if b is not None]
-    maxdim = np.array([b['frames'].shape[1] for b in batch]).clip(64, 256).max()
+    maxdim = np.array([b['frames'].shape[1] for b in batch]).clip(64, 224).max()
     batchlen = [b['frames'].shape[0]//b['frames'].shape[1] for b in batch]
 
     
@@ -362,8 +434,9 @@ valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_work
 
 
 logger.info('Create model')
-poolsize=(1, 2) #, 6)
+poolsize=(1, 2, 4)
 embedsize = 512*sum(i**2 for i in poolsize)
+logger.info('RNN embedding size : {}'.format(embedsize))
 model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
                   dropout = 0.2, embed_size = embedsize)
 model = model.to(device)

@@ -70,6 +70,7 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
+parser.add_option('-s', '--modname', action="store", dest="modname", help="base spp sequence model", default="1")
 
 
 options, args = parser.parse_args()
@@ -110,7 +111,7 @@ LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
-
+MODNAME=os.path.join(INPATH, options.modname)
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
@@ -444,7 +445,7 @@ for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
-    model_file_name = 'weights/sppnet_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+    model_file_name = 'weights/sppnet_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)

@@ -346,10 +346,10 @@ ypredvalls = []
 for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     if (epoch % RESETLR == (RESETLR-1) ):# and (epoch>0):
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, steps * RESETLR )
-    logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, STEPS*RESETLR)
+    logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate)) 
     logger.info('-' * 10)
-    model_file_name = 'weights/sppnet_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+    model_file_name = 'weights/sppnet_ann_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)

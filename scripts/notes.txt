@@ -1,0 +1,4 @@
+spp08 - lots of augmentation
+spp11 - variable sized images; reduce spatial pooling to (1, 2) and (1, 2, 4)
+spp12 - reproduce spp08
+spp13 - Cosine LR schdule ~20 epochs

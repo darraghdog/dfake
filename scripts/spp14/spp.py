@@ -317,13 +317,15 @@ valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=8, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
+trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
 
 logger.info('Create model')
 poolsize=(1, 2, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
+# embedsize = 384*sum(i**2 for i in poolsize)
+
 model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
                   dropout = 0.2, embed_size = embedsize)
 model = model.to(device)

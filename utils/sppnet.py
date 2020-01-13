@@ -15,6 +15,7 @@ for bb in [18, 34, 50]:
 class ResNet(nn.Module):
     def __init__(self, layers=18, num_class=2, pretrained=False, folder = None):
         super(ResNet, self).__init__()
+        self.layers=layers
         if layers == 18:
             self.resnet = models.resnet18(pretrained=pretrained)
         elif layers == 34:
@@ -31,7 +32,11 @@ class ResNet(nn.Module):
         if layers in [18, 34]:
             self.fc = nn.Linear(512, num_class)
         if layers in [50, 101, 152]:
-            self.fc = nn.Linear(512 * 4, num_class)
+            self.conv_head = nn.Sequential( \
+                nn.Conv2d(2048, 512, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
+      	        nn.ReLU(inplace=True))
+            self.fc = nn.Linear(512, num_class)
 
     def conv_base(self, x):
         x = self.resnet.conv1(x)
@@ -43,6 +48,8 @@ class ResNet(nn.Module):
         layer2 = self.resnet.layer2(layer1)
         layer3 = self.resnet.layer3(layer2)
         layer4 = self.resnet.layer4(layer3)
+        if self.layers in [50, 101, 152]:
+            layer4 = self.conv_head(layer4)
         return layer1, layer2, layer3, layer4
 
     def forward(self, x):

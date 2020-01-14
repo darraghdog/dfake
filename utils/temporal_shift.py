@@ -48,7 +48,6 @@ class TemporalShift(nn.Module):
 
         return out.view(nt, c, h, w)
 
-
 class InplaceShift(torch.autograd.Function):
     # Special thanks to @raoyongming for the help to this function
     @staticmethod
@@ -379,6 +378,8 @@ class TSN(nn.Module):
         ]
 
     def forward(self, input, no_reshape=False):
+        #print(50*'--')
+        #print(self.dropout, self.modality, self.before_softmax, self.reshape, self.is_shift)
         if not no_reshape:
             sample_len = (3 if self.modality == "RGB" else 2) * self.new_length
 
@@ -389,10 +390,10 @@ class TSN(nn.Module):
             base_out = self.base_model(input.view((-1, sample_len) + input.size()[-2:]))
         else:
             base_out = self.base_model(input)
-
+        
         if self.dropout > 0:
             base_out = self.new_fc(base_out)
-
+        
         if not self.before_softmax:
             base_out = self.softmax(base_out)
 
@@ -401,8 +402,10 @@ class TSN(nn.Module):
                 base_out = base_out.view((-1, self.num_segments // 2) + base_out.size()[1:])
             else:
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
+            #print(base_out)
             output = self.consensus(base_out)
             return output.squeeze(1)
+        
 
     def _get_diff(self, input, keep_rgb=False):
         input_c = 3 if self.modality in ["RGB", "RGBDiff"] else 2

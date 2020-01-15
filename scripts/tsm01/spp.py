@@ -70,6 +70,8 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
+parser.add_option('-s', '--maxlen', action="store", dest="maxlen", help="Cap all frames sequences here", default="40")
+parser.add_option('-t', '--nsegment', action="store", dest="nsegment", help="TSM sequence length", default="8")
 
 
 options, args = parser.parse_args()
@@ -81,6 +83,7 @@ from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from sort import *
 from sppnet import SPPNet
+from utils.temporal_shift import TSN
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -105,11 +108,13 @@ WTSPATH = os.path.join(INPATH, options.wtspath)
 IMGDIR = os.path.join(INPATH, options.imgpath)
 EPOCHS = int(options.epochs)
 START = int(options.start)
-LR=float(options.lr)
-LRGAMMA=float(options.lrgamma)
-DECAY=float(options.decay)
-INFER=options.infer
-ACCUM=int(options.accum)
+LR = float(options.lr)
+LRGAMMA = float(options.lrgamma)
+DECAY = float(options.decay)
+INFER = options.infer
+ACCUM = int(options.accum)
+MAXLEN = int(options.maxlen)
+NSEGMENT = int(options.nsegment)
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
@@ -128,12 +133,16 @@ class SPPSeqNet(nn.Module):
         self.linear_out = nn.Linear(self.dense_units*2, 1)
         self.embedding_dropout = SpatialDropout(dropout)
     
-    def forward(self, x):
+    def forward(self, x, nseg):
         # Input is batch of image sequences
         batch_size, seqlen = x.size()[:2]
         # Flatten to make a single long list of frames
-        x = x.view(batch_size * seqlen, *x.size()[2:])
+        # x = x.view(batch_size * seqlen, *x.size()[2:])
+        x = x.view(batch_size * (seqlen/nseg), nseg, *x.size()[2:])
         # Pass each frame thru SPPNet
+        '''
+        Stuck here
+        '''
         emb = self.sppnet(x.permute(0,3,1,2))
         # Split back out to batch
         emb = emb.view(batch_size, seqlen, emb.size()[1])
@@ -290,16 +299,19 @@ class DFakeDataset(Dataset):
 def collatefn(batch):
     # Remove error reads
     batch = [b for b in batch if b is not None]
-    seqlen = torch.tensor([l['frames'].shape[0] for l in batch])
+    seqlen = torch.tensor([l['frames'].shape[0] for l in batch]).type(torch.DoubleTensor)
     ids = torch.tensor([l['idx'] for l in batch])
 
     maxlen = seqlen.max()    
+    # Get the seq len in segment intervals
+    padlen = min(32, math.ceil(seqlen.max()/NSEGMENTS) * NSEGMENTS)
+
     # get shapes
     d0,d1,d2,d3 = batch[0]['frames'].shape
         
-    # Pad with zero frames
-    x_batch = [l['frames'] if l['frames'].shape[0] == maxlen else \
-         torch.cat((l['frames'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
+    # Pad with zero frames and batch to one tensor
+    x_batch = [l['frames'][:padlen] if padlen-int(sl) < 0 else \
+         torch.cat((l['frames'], torch.zeros((padlen-int(sl),d1,d2,d3))), 0) 
          for l,sl in zip(batch, seqlen)]
     x_batch = torch.cat([x.unsqueeze(0) for x in x_batch])
     
@@ -315,19 +327,35 @@ logger.info('Create loaders...')
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
-trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
-valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
+trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = MAXLEN)
+valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = MAXLEN)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
 
 logger.info('Create model')
+'''
 poolsize=(1, 2, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
-# embedsize = 384*sum(i**2 for i in poolsize)
-
 model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
                   dropout = 0.2, embed_size = embedsize)
+'''
+'''
+folder='/Users/dhanley2/Documents/Personal/dfake/weights'
+model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.0, \
+            base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
+            temporal_pool=False, conv_head_dim = 384, pool_size = (1,2,6), \
+            dense_units=256)
+output_model_file = '{}/tsmresnet{}.pth'.format(folder, '50')
+torch.save(model.state_dict(), output_model_file)
+'''
+model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.0, \
+            base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
+            temporal_pool=False, conv_head_dim = 384, pool_size = (1,2,6), \
+            dense_units=256)
+input_model_file = os.path.join(WTSFILES, 'tsmresnet50.pth')
+model.load_state_dict(torch.load(input_model_file))
+
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -344,28 +372,33 @@ criterion = torch.nn.BCEWithLogitsLoss()
 
 ypredvalls = []
 for epoch in range(EPOCHS):
+
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
     model_file_name = 'weights/sppnet_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+    nseg = NSEGMENT.to(device, dtype=torch.float)
+    nseg = torch.autograd.Variable(nseg)
+    
     if epoch<START:
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
         scheduler.step()
         continue
-    if INFER not in ['TST', 'EMB', 'VAL']:
 
+    if INFER not in ['TST', 'EMB', 'VAL']:
         tr_loss = 0.
         for param in model.parameters():
             param.requires_grad = True
         model.train()  
+
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
             y = batch['labels'].to(device, dtype=torch.float)
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)
-            out = model(x)
+            out = model(x, nseg)
             # Get loss
             loss = criterion(out, y)
             tr_loss += loss.item()
@@ -380,9 +413,12 @@ for epoch in range(EPOCHS):
             del x, y, out, batch
         torch.save(model.state_dict(), model_file_name)
         scheduler.step()
+
     else:
+
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
+
     if INFER in ['VAL', 'TRN']:
         model.eval()
         ypredval = []

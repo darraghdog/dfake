@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.init import normal_, constant_
 
+
 class TemporalShift(nn.Module):
     def __init__(self, net, n_segment=3, n_div=8, inplace=False):
         super(TemporalShift, self).__init__()
@@ -97,6 +98,66 @@ class TemporalPool(nn.Module):
         x = x.transpose(1, 2).contiguous().view(nt // 2, c, h, w)
         return x
 
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+        
+    def forward(self, x):
+        return x
+
+class SpatialDropout(nn.Dropout2d):
+    def forward(self, x):
+        x = x.unsqueeze(2)    # (N, T, 1, K)
+        x = x.permute(0, 3, 2, 1)  # (N, K, 1, T)
+        x = super(SpatialDropout, self).forward(x)  # (N, K, 1, T), some features are masked
+        x = x.permute(0, 3, 2, 1)  # (N, T, 1, K)
+        x = x.squeeze(2)  # (N, T, K)
+        return x
+
+'''
+class Seq2Batch(nn.Module):
+    def __init__(self, n_segments = 8):
+        super(Seq2Batch, self).__init__()
+        self.n_segments = n_segments
+        
+    def forward(self, x):
+        return x.view(x.size()[0]// self.n_segments, -1, x.size()[-1])
+    
+class PoolLSTM(nn.Module):
+    def __init__(self):
+        super(PoolLSTM, self).__init__()
+        
+    def forward(self, x):
+        x, _ = torch.max(x, 1)
+        return x
+'''   
+    
+class SpatialPyramidPool2D(nn.Module):
+    """
+    Args:
+        out_side (tuple): Length of side in the pooling results of each pyramid layer.
+
+    Inputs:
+        - `input`: the input Tensor to invert ([batch, channel, width, height])
+    """
+
+    def __init__(self, out_side):
+        super(SpatialPyramidPool2D, self).__init__()
+        self.out_side = out_side
+
+    def forward(self, x):
+        # batch_size, c, h, w = x.size()
+        out = None
+        for n in self.out_side:
+            w_r, h_r = map(lambda s: math.ceil(s / n), x.size()[2:])  # Receptive Field Size
+            s_w, s_h = map(lambda s: math.floor(s / n), x.size()[2:])  # Stride
+            max_pool = nn.MaxPool2d(kernel_size=(w_r, h_r), stride=(s_w, s_h))
+            y = max_pool(x)
+            if out is None:
+                out = y.view(y.size()[0], -1)
+            else:
+                out = torch.cat((out, y.view(y.size()[0], -1)), 1)
+        return out
 
 def make_temporal_shift(net, n_segment, n_div=8, place='blockres', temporal_pool=False):
     if temporal_pool:
@@ -154,8 +215,9 @@ def make_temporal_pool(net, n_segment):
 class TSN(nn.Module):
     def __init__(self, num_class, num_segments, modality,
                  base_model='resnet101', new_length=None,
-                 consensus_type='avg', before_softmax=True,
-                 dropout=0.8, img_feature_dim=256,
+                 consensus_type='avg', before_softmax=True, dropout=0.8, 
+                 img_feature_dim=256, pool_size = (1,2,6), conv_head_dim = 384,
+                 dense_units=256, 
                  crop_num=1, partial_bn=True, print_spec=True, pretrain='imagenet',
                  is_shift=False, shift_div=8, shift_place='blockres', fc_lr5=False,
                  temporal_pool=False, non_local=False):
@@ -169,7 +231,9 @@ class TSN(nn.Module):
         self.consensus_type = consensus_type
         self.img_feature_dim = img_feature_dim  # the dimension of the CNN feature to represent each frame
         self.pretrain = pretrain
-
+        self.pool_size = pool_size
+        self.conv_head_dim = conv_head_dim
+        self.embed_size = self.conv_head_dim *sum(i**2 for i in self.pool_size)
         self.is_shift = is_shift
         self.shift_div = shift_div
         self.shift_place = shift_place
@@ -177,6 +241,13 @@ class TSN(nn.Module):
         self.fc_lr5 = fc_lr5
         self.temporal_pool = temporal_pool
         self.non_local = non_local
+        
+        # Initialise sequential head
+        self.dense_units = dense_units
+        self.lstm1 = nn.LSTM(self.embed_size, self.dense_units, bidirectional=True, batch_first=True)
+        self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
+        self.linear_out = nn.Linear(self.dense_units*2, 1)
+        self.embedding_dropout = SpatialDropout(dropout)
 
         if not before_softmax and consensus_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
@@ -198,7 +269,7 @@ class TSN(nn.Module):
             """.format(base_model, self.modality, self.num_segments, self.new_length, consensus_type, self.dropout, self.img_feature_dim)))
 
         self._prepare_base_model(base_model)
-
+        
         feature_dim = self._prepare_tsn(num_class)
 
         if self.modality == 'Flow':
@@ -209,7 +280,32 @@ class TSN(nn.Module):
             print("Converting the ImageNet model to RGB+Diff init model")
             self.base_model = self._construct_diff_model(self.base_model)
             print("Done. RGBDiff model ready.")
+        
+        '''
+        self.base_model.layer4[0].downsample[0] = nn.Conv2d(1024, 512, kernel_size=(1, 1), stride=(2, 2), bias=False)
+        self.base_model.layer4[0].downsample[1] = nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        self.base_model.layer4[1].conv3 = nn.Conv2d(512, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+        self.base_model.layer4[1].bn3 = nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)        
+        '''
+        #self.base_model.layer4[2].conv3 = nn.Conv2d(512, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+        #self.base_model.layer4[2].bn3 = nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
 
+        # Remove Avgpool
+        #self.base_model.avgpool = Identity()
+        self.base_model.fc = Identity()
+        # Add conv layer to downsize the number of feature maps
+        '''
+        self.base_model.last_layer_name = 'conv_head'
+        conv_head = nn.Sequential( \
+                nn.Conv2d(2048, 512, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
+      	        nn.ReLU(inplace=True))
+        setattr(self.base_model, self.base_model.last_layer_name, conv_head)
+        
+        '''
+
+        
+        '''
         self.consensus = ConsensusModule(consensus_type)
 
         if not self.before_softmax:
@@ -218,16 +314,22 @@ class TSN(nn.Module):
         self._enable_pbn = partial_bn
         if partial_bn:
             self.partialBN(True)
+        '''
 
+    
     def _prepare_tsn(self, num_class):
         feature_dim = getattr(self.base_model, self.base_model.last_layer_name).in_features
+        
+        
+        '''
         if self.dropout == 0:
             setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))
-            self.new_fc = None
+            # self.new_fc = None
         else:
             setattr(self.base_model, self.base_model.last_layer_name, nn.Dropout(p=self.dropout))
-            self.new_fc = nn.Linear(feature_dim, num_class)
-
+            # self.new_fc = nn.Linear(feature_dim, num_class)
+        '''
+        '''
         std = 0.001
         if self.new_fc is None:
             normal_(getattr(self.base_model, self.base_model.last_layer_name).weight, 0, std)
@@ -236,8 +338,9 @@ class TSN(nn.Module):
             if hasattr(self.new_fc, 'weight'):
                 normal_(self.new_fc.weight, 0, std)
                 constant_(self.new_fc.bias, 0)
+        '''
         return feature_dim
-
+            
     def _prepare_base_model(self, base_model):
         print('=> base model: {}'.format(base_model))
 
@@ -259,7 +362,22 @@ class TSN(nn.Module):
             self.input_mean = [0.485, 0.456, 0.406]
             self.input_std = [0.229, 0.224, 0.225]
 
-            self.base_model.avgpool = nn.AdaptiveAvgPool2d(1)
+            #print(self.base_model)
+            #self.base_model.layer4[2].conv3 = nn.Conv2d(512, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
+            #self.base_model.layer4[2].bn3 = nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            
+            '''
+            Reuse the avg pool layer for spp
+            To do, change name from avgpool to spp_head
+            '''
+            
+            self.base_model.avgpool = nn.Sequential( \
+                nn.Conv2d(2048, self.conv_head_dim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                nn.BatchNorm2d(self.conv_head_dim , eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
+                nn.ReLU(inplace=True), 
+                SpatialPyramidPool2D(self.pool_size))
+            # self.base_model.spp = SpatialPyramidPool2D()
+            # Change output to 512
 
             if self.modality == 'Flow':
                 self.input_mean = [0.5]
@@ -378,6 +496,41 @@ class TSN(nn.Module):
         ]
 
     def forward(self, input, no_reshape=False):
+        
+        sample_len = (3 if self.modality == "RGB" else 2) * self.new_length
+
+        if self.modality == 'RGBDiff':
+            sample_len = 3 * self.new_length
+            input = self._get_diff(input)
+        
+        # input = input.permute(0, 1, 4, 2, 3)
+        bsize, seqlen = input.shape[:2]
+        input = input.view((-1, 3) + input.size()[-2:])
+        
+        # Extract the spatially pooled layer
+        spp_emb = self.base_model(input)
+        
+        # Split back out to batch
+        emb = spp_emb.view(bsize, -1, spp_emb.shape[-1])
+        emb = self.embedding_dropout(emb)
+        
+        # Pass batch thru sequential model(s)
+        h_lstm1, _ = self.lstm1(emb)
+        max_pool, _ = torch.max(h_lstm1, 1)
+        h_pool_linear = F.relu(self.linear1(max_pool))
+        
+        # Max pool and linear layer
+        hidden = max_pool + h_pool_linear
+        
+        # Classifier
+        out = self.linear_out(hidden)
+        
+        base_out = emb
+        
+        return out
+    
+    '''
+    def forward(self, input, no_reshape=False):
         #print(50*'--')
         #print(self.dropout, self.modality, self.before_softmax, self.reshape, self.is_shift)
         if not no_reshape:
@@ -404,9 +557,9 @@ class TSN(nn.Module):
                 base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
             #print(base_out)
             output = self.consensus(base_out)
-            return output.squeeze(1)
-        
-
+            return output.squeeze(1)    
+    '''
+    
     def _get_diff(self, input, keep_rgb=False):
         input_c = 3 if self.modality in ["RGB", "RGBDiff"] else 2
         input_view = input.view((-1, self.num_segments, self.new_length + 1, input_c,) + input.size()[2:])
@@ -1273,6 +1426,3 @@ if __name__ == '__main__':
             grad2 = torch.autograd.grad((y2 ** 2).mean(), [x2])[0]
             assert torch.norm(grad1 - grad2).item() < 1e-5
     print('Test passed.')
-
-
-

@@ -70,7 +70,7 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
-parser.add_option('-s', '--modname', action="store", dest="modname", help="base spp sequence model", default="1")
+parser.add_option('-s', '--modname', action="store", dest="modname", help="base spp sequence model", default="")
 
 
 options, args = parser.parse_args()
@@ -111,7 +111,7 @@ LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
-MODNAME=os.path.join(INPATH, options.modname)
+MODNAME = options.modname if options.modname=='' else  os.path.join(INPATH, options.modname)
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
@@ -159,19 +159,20 @@ class SeqMod(nn.Module):
         super(SeqMod, self).__init__()
         
         # Params
-        self.ratio = 8
-        self.dense_units = 64
-        self.lstm_layers = 2
-        self.poolsize=(1, 2, 6)
+        self.ratio = ratio
+        self.dense_units = dense_units
+        self.lstm_layers = lstm_layers
+        self.poolsize = poolsize
         self.embed_size = 512*sum(i**2 for i in self.poolsize)
         
         # Pretrained Spatial Pyramid Pooling
         self.modbase = SPPSeqNet(backbone=34, pool_size=self.poolsize, dense_units = 256, \
                           dropout = 0.2, embed_size = self.embed_size)
-        self.modbase.load_state_dict(torch.load(modname, map_location=device))
-        for param in self.modbase.parameters():
-            param.requires_grad = False
-        self.modbase.eval()
+        if modname !='':
+            self.modbase.load_state_dict(torch.load(modname, map_location=device))
+            for param in self.modbase.parameters():
+                param.requires_grad = False
+            self.modbase.eval()
         
         # Sequence model 1 : Conv layers
         self.conv_first = nn.Sequential(nn.Conv1d(self.embed_size, self.dense_units*2*self.ratio, \
@@ -214,7 +215,7 @@ class SeqMod(nn.Module):
         # Split back out to batch
         emb = emb.view(batch_size, seqlen, emb.size()[1])
         # Conv1d part
-        x = emb.view(batch_size, embed_size, -1).contiguous()
+        x = emb.view(batch_size, self.embed_size, -1).contiguous()
         x = self.conv_first(x)
         x = self.conv_res(x)
         x_cnn = self.conv_final(x)
@@ -401,16 +402,13 @@ valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=8, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=8, collate_fn=collatefn)
+trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=16, collate_fn=collatefn)
 
 
 logger.info('Create model')
-'''
-poolsize=(1, 2, 6)
-embedsize = 512*sum(i**2 for i in poolsize)
-model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  dropout = 0.2, embed_size = embedsize)
+
+model = SeqMod(MODNAME, poolsize=(1, 2, 6), dense_units = 64, ratio = 4, lstm_layers = 1)
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -419,26 +417,9 @@ plist = [
     {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 optimizer = optim.Adam(plist, lr=LR)
-# scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
-
-model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
-criterion = torch.nn.BCEWithLogitsLoss()
-'''
-
-model = SeqMod(MODNAME, poolsize=(1, 2, 6), dense_units = 64, ratio = 8, lstm_layers = 2)
-param_optimizer = list(model.named_parameters())
-no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
-plist = [
-    {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': DECAY},
-    {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-    ]
-optimizer = optim.Adam(plist, lr=LR)
 criterion = torch.nn.BCEWithLogitsLoss()
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
-model.train()
-
 
 ypredvalls = []
 for epoch in range(EPOCHS):
@@ -457,6 +438,7 @@ for epoch in range(EPOCHS):
         for param in model.parameters():
             param.requires_grad = True
         model.train()  
+        logger.info('Requires grad layers : '+''.join([str(int(param.requires_grad)) for param in model.parameters()]))
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
             y = batch['labels'].to(device, dtype=torch.float)

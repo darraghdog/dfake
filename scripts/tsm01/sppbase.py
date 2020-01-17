@@ -315,6 +315,8 @@ logger.info('Create loaders...')
 # BATCHSIZE=2
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
+# trndf = trndf.head(200)
+# valdf = valdf.head(200)
 
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
@@ -334,7 +336,8 @@ NSEGMENT=32
 model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.5, \
             base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
             temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
-            consensus_type='avg', custom_weights = False)
+            partial_bn=False, consensus_type='avg', custom_weights = True)
+model.load_state_dict(torch.load( os.path.join( WTSPATH, 'tsmresnet50_base.pth' ) ))
 
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
@@ -369,6 +372,7 @@ for epoch in range(EPOCHS):
         model.train()  
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
+            x = x.permute(0, 1, 4, 2, 3)
             y = batch['labels'].to(device, dtype=torch.float)
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)
@@ -398,6 +402,7 @@ for epoch in range(EPOCHS):
         with torch.no_grad():
             for step, batch in enumerate(valloader):
                 x = batch['frames'].to(device, dtype=torch.float)
+                x = x.permute(0, 1, 4, 2, 3)
                 out = model(x)
                 out = torch.sigmoid(out)
                 ypredval.append(out.cpu().detach().numpy())

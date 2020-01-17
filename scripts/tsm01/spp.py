@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 import glob
 import json
 import cv2
@@ -79,11 +80,11 @@ INPATH = options.rootpath
 
 #INPATH='/Users/dhanley2/Documents/Personal/dfake'
 sys.path.append(os.path.join(INPATH, 'utils' ))
+from temporalshift import TSN
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from sort import *
 from sppnet import SPPNet
-from utils.temporal_shift import TSN
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -304,7 +305,7 @@ def collatefn(batch):
 
     maxlen = seqlen.max()    
     # Get the seq len in segment intervals
-    padlen = min(32, math.ceil(seqlen.max()/NSEGMENTS) * NSEGMENTS)
+    padlen = min(32, math.ceil(seqlen.max()/NSEGMENT) * NSEGMENT)
 
     # get shapes
     d0,d1,d2,d3 = batch[0]['frames'].shape
@@ -345,17 +346,16 @@ folder='/Users/dhanley2/Documents/Personal/dfake/weights'
 model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.0, \
             base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
             temporal_pool=False, conv_head_dim = 384, pool_size = (1,2,6), \
-            dense_units=256)
+            dense_units=256, load_pretrain = True)
 output_model_file = '{}/tsmresnet{}.pth'.format(folder, '50')
 torch.save(model.state_dict(), output_model_file)
 '''
 model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.0, \
             base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
             temporal_pool=False, conv_head_dim = 384, pool_size = (1,2,6), \
-            dense_units=256)
+            partial_bn=False, dense_units=256, load_pretrain = False)
 input_model_file = os.path.join(WTSFILES, 'tsmresnet50.pth')
 model.load_state_dict(torch.load(input_model_file))
-
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -376,9 +376,7 @@ for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
-    model_file_name = 'weights/sppnet_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
-    nseg = NSEGMENT.to(device, dtype=torch.float)
-    nseg = torch.autograd.Variable(nseg)
+    model_file_name = 'weights/tsm_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     
     if epoch<START:
         model.load_state_dict(torch.load(model_file_name))
@@ -398,7 +396,7 @@ for epoch in range(EPOCHS):
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)
-            out = model(x, nseg)
+            out = model(x)
             # Get loss
             loss = criterion(out, y)
             tr_loss += loss.item()

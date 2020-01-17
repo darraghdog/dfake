@@ -4,4 +4,5 @@
 
 | Model (`.scripts/` folder) |Image Size|Epochs|Bag|TTA |Fold|Val     |LB    |Comment                          |
 | ---------------|----------|------|---|----|----|--------|------|---------------------------------|
+| Resnet50 and one 34; SPPNet|224       |7,8,9     |3 | NA |0  |~0.174 (0.183, 0.182, 0.174)  | 0.362 | `spp14` single lstm 256 HU |  
 | Resnet34; SPPNet|224       |7,8,9     |3 | NA |0  |0.1786 (0.179, 0.219, 0.210) | 0.386 | `spp13` single lstm 256 HU |

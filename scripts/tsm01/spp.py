@@ -80,7 +80,7 @@ INPATH = options.rootpath
 
 #INPATH='/Users/dhanley2/Documents/Personal/dfake'
 sys.path.append(os.path.join(INPATH, 'utils' ))
-from temporalshift import TSN
+from utils.temporalshift import TSN
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from sort import *
@@ -342,18 +342,23 @@ model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
                   dropout = 0.2, embed_size = embedsize)
 '''
 '''
+del TSN
+from utils.temporalshift import TSN
 folder='/Users/dhanley2/Documents/Personal/dfake/weights'
+NSEGMENT=32
 model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.0, \
             base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
-            temporal_pool=False, conv_head_dim = 384, pool_size = (1,2,6), \
-            dense_units=256, load_pretrain = True)
+            temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
+            conv_head_dim = 512, pool_size = (1,2,6), \
+            partial_bn=False, dense_units=256, load_pretrain = True)
 output_model_file = '{}/tsmresnet{}.pth'.format(folder, '50')
 torch.save(model.state_dict(), output_model_file)
 '''
 model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.0, \
             base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
-            temporal_pool=False, conv_head_dim = 384, pool_size = (1,2,6), \
-            partial_bn=False, dense_units=256, load_pretrain = False)
+            temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
+            conv_head_dim = 512, pool_size = (1,2,6), \
+            partial_bn=False, dense_units=256, load_pretrain = True)
 input_model_file = os.path.join(WTSFILES, 'tsmresnet50.pth')
 model.load_state_dict(torch.load(input_model_file))
 model = model.to(device)

@@ -105,17 +105,27 @@ def make_temporal_shift(net, n_segment, n_div=8, place='blockres', temporal_pool
         n_segment_list = [n_segment] * 4
     assert n_segment_list[-1] > 0
     print('=> n_segment per stage: {}'.format(n_segment_list))
+    
 
-    import torchvision
-    if isinstance(net, torchvision.models.ResNet):
+    if place == 'block':
+        def make_block_temporal(stage, this_segment):
+            blocks = list(stage.children())
+            print('=> Processing stage with {} blocks'.format(len(blocks)))
+            for i, b in enumerate(blocks):
+                blocks[i] = TemporalShift(b, n_segment=this_segment, n_div=n_div)
+            return nn.Sequential(*(blocks))    
+
+    elif 'blockres' in place:
+        def make_block_temporal(stage, this_segment):
+            blocks = list(stage.children())
+            print('=> Processing stage with {} blocks residual'.format(len(blocks)))
+            for i, b in enumerate(blocks):
+                if i % n_round == 0:
+                    blocks[i].conv1 = TemporalShift(b.conv1, n_segment=this_segment, n_div=n_div)
+            return nn.Sequential(*blocks)
+
+    if any(s in str(type(net)) for s in ['SENet', 'ResNet']):
         if place == 'block':
-            def make_block_temporal(stage, this_segment):
-                blocks = list(stage.children())
-                print('=> Processing stage with {} blocks'.format(len(blocks)))
-                for i, b in enumerate(blocks):
-                    blocks[i] = TemporalShift(b, n_segment=this_segment, n_div=n_div)
-                return nn.Sequential(*(blocks))
-
             net.layer1 = make_block_temporal(net.layer1, n_segment_list[0])
             net.layer2 = make_block_temporal(net.layer2, n_segment_list[1])
             net.layer3 = make_block_temporal(net.layer3, n_segment_list[2])
@@ -125,21 +135,14 @@ def make_temporal_shift(net, n_segment, n_div=8, place='blockres', temporal_pool
             n_round = 1
             if len(list(net.layer3.children())) >= 23:
                 print('=> Using n_round {} to insert temporal shift'.format(n_round))
-
-            def make_block_temporal(stage, this_segment):
-                blocks = list(stage.children())
-                print('=> Processing stage with {} blocks residual'.format(len(blocks)))
-                for i, b in enumerate(blocks):
-                    if i % n_round == 0:
-                        blocks[i].conv1 = TemporalShift(b.conv1, n_segment=this_segment, n_div=n_div)
-                return nn.Sequential(*blocks)
-
             net.layer1 = make_block_temporal(net.layer1, n_segment_list[0])
             net.layer2 = make_block_temporal(net.layer2, n_segment_list[1])
             net.layer3 = make_block_temporal(net.layer3, n_segment_list[2])
             net.layer4 = make_block_temporal(net.layer4, n_segment_list[3])
+            
     else:
         raise NotImplementedError(place)
+
 
 
 def make_temporal_pool(net, n_segment):
@@ -221,6 +224,7 @@ class TSN(nn.Module):
             self.partialBN(True)
 
     def _prepare_tsn(self, num_class):
+        
         feature_dim = getattr(self.base_model, self.base_model.last_layer_name).in_features
         if self.dropout == 0:
             setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))
@@ -231,8 +235,9 @@ class TSN(nn.Module):
 
         std = 0.001
         if self.new_fc is None:
-            normal_(getattr(self.base_model, self.base_model.last_layer_name).weight, 0, std)
-            constant_(getattr(self.base_model, self.base_model.last_layer_name).bias, 0)
+            if 'resnet' in base_model:
+                normal_(getattr(self.base_model, self.base_model.last_layer_name).weight, 0, std)
+                constant_(getattr(self.base_model, self.base_model.last_layer_name).bias, 0)
         else:
             if hasattr(self.new_fc, 'weight'):
                 normal_(self.new_fc.weight, 0, std)
@@ -242,8 +247,14 @@ class TSN(nn.Module):
     def _prepare_base_model(self, base_model):
         print('=> base model: {}'.format(base_model))
 
-        if 'resnet' in base_model:
-            self.base_model = getattr(torchvision.models, base_model)(not self.custom_weights)
+        if any(n in base_model for n in ['resnet', 'se_resnext']):
+            if 'resnet' in base_model:
+                self.base_model = \
+                        getattr(torchvision.models, base_model)(not self.custom_weights)
+            elif 'se_resnext' in base_model:
+                import pretrainedmodels
+                model_func = pretrainedmodels.__dict__[base_model]
+                self.base_model = model_func(num_classes=1000, pretrained='imagenet')
             if self.is_shift:
                 print('Adding temporal shift...')
                 # from ops.temporal_shift import make_temporal_shift
@@ -255,12 +266,19 @@ class TSN(nn.Module):
                 from ops.non_local import make_non_local
                 make_non_local(self.base_model, self.num_segments)
 
-            self.base_model.last_layer_name = 'fc'
+            
             self.input_size = 224
             self.input_mean = [0.485, 0.456, 0.406]
             self.input_std = [0.229, 0.224, 0.225]
-
-            self.base_model.avgpool = nn.AdaptiveAvgPool2d(1)
+            
+            if 'resnet' in base_model:
+                self.base_model.last_layer_name = 'fc'
+                self.base_model.avgpool = nn.AdaptiveAvgPool2d(1)
+            else:
+                self.base_model.avg_pool = nn.AdaptiveAvgPool2d(1)
+                self.base_model.fc = self.base_model.last_linear
+                self.base_model.last_linear=Identity()
+                self.base_model.last_layer_name = 'fc'
 
             if self.modality == 'Flow':
                 self.input_mean = [0.5]

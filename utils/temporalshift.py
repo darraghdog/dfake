@@ -159,6 +159,7 @@ class SpatialPyramidPool2D(nn.Module):
                 out = torch.cat((out, y.view(y.size()[0], -1)), 1)
         return out
 
+'''
 def make_temporal_shift(net, n_segment, n_div=8, place='blockres', temporal_pool=False):
     if temporal_pool:
         n_segment_list = [n_segment, n_segment // 2, n_segment // 2, n_segment // 2]
@@ -199,6 +200,52 @@ def make_temporal_shift(net, n_segment, n_div=8, place='blockres', temporal_pool
             net.layer2 = make_block_temporal(net.layer2, n_segment_list[1])
             net.layer3 = make_block_temporal(net.layer3, n_segment_list[2])
             net.layer4 = make_block_temporal(net.layer4, n_segment_list[3])
+    else:
+        raise NotImplementedError(place)
+'''
+
+def make_temporal_shift(net, n_segment, n_div=8, place='blockres', temporal_pool=False):
+    if temporal_pool:
+        n_segment_list = [n_segment, n_segment // 2, n_segment // 2, n_segment // 2]
+    else:
+        n_segment_list = [n_segment] * 4
+    assert n_segment_list[-1] > 0
+    print('=> n_segment per stage: {}'.format(n_segment_list))
+    
+
+    if place == 'block':
+        def make_block_temporal(stage, this_segment):
+            blocks = list(stage.children())
+            print('=> Processing stage with {} blocks'.format(len(blocks)))
+            for i, b in enumerate(blocks):
+                blocks[i] = TemporalShift(b, n_segment=this_segment, n_div=n_div)
+            return nn.Sequential(*(blocks))    
+
+    elif 'blockres' in place:
+        def make_block_temporal(stage, this_segment):
+            blocks = list(stage.children())
+            print('=> Processing stage with {} blocks residual'.format(len(blocks)))
+            for i, b in enumerate(blocks):
+                if i % n_round == 0:
+                    blocks[i].conv1 = TemporalShift(b.conv1, n_segment=this_segment, n_div=n_div)
+            return nn.Sequential(*blocks)
+
+    if any(s in str(type(net)) for s in ['SENet', 'ResNet']):
+        if place == 'block':
+            net.layer1 = make_block_temporal(net.layer1, n_segment_list[0])
+            net.layer2 = make_block_temporal(net.layer2, n_segment_list[1])
+            net.layer3 = make_block_temporal(net.layer3, n_segment_list[2])
+            net.layer4 = make_block_temporal(net.layer4, n_segment_list[3])
+
+        elif 'blockres' in place:
+            n_round = 1
+            if len(list(net.layer3.children())) >= 23:
+                print('=> Using n_round {} to insert temporal shift'.format(n_round))
+            net.layer1 = make_block_temporal(net.layer1, n_segment_list[0])
+            net.layer2 = make_block_temporal(net.layer2, n_segment_list[1])
+            net.layer3 = make_block_temporal(net.layer3, n_segment_list[2])
+            net.layer4 = make_block_temporal(net.layer4, n_segment_list[3])
+            
     else:
         raise NotImplementedError(place)
 
@@ -348,7 +395,6 @@ class TSN(nn.Module):
             self.base_model = getattr(torchvision.models, base_model)(self.load_pretrain)
             if self.is_shift:
                 print('Adding temporal shift...')
-                from ops.temporal_shift import make_temporal_shift
                 make_temporal_shift(self.base_model, self.num_segments,
                                     n_div=self.shift_div, place=self.shift_place, temporal_pool=self.temporal_pool)
 
@@ -362,15 +408,10 @@ class TSN(nn.Module):
             self.input_mean = [0.485, 0.456, 0.406]
             self.input_std = [0.229, 0.224, 0.225]
 
-            #print(self.base_model)
-            #self.base_model.layer4[2].conv3 = nn.Conv2d(512, 512, kernel_size=(1, 1), stride=(1, 1), bias=False)
-            #self.base_model.layer4[2].bn3 = nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-            
             '''
             Reuse the avg pool layer for spp
             To do, change name from avgpool to spp_head
             '''
-            
             self.base_model.avgpool = nn.Sequential( \
                 nn.Conv2d(2048, self.conv_head_dim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
                 nn.BatchNorm2d(self.conv_head_dim , eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \

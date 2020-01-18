@@ -341,11 +341,17 @@ model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
 '''
 from tsm import TSN
 NSEGMENT=32
+'''
 model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.5, \
             base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
             temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
             partial_bn=False, consensus_type='avg', custom_weights = True)
 model.load_state_dict(torch.load( os.path.join( WTSPATH, 'tsmresnet50_base.pth' ) ))
+'''
+model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.5, \
+            base_model='se_resnext50_32x4d', img_feature_dim=224, pretrain='imagenet', \
+            temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
+            consensus_type='avg')
 
 model = model.to(device)
 param_optimizer = list(model.named_parameters())

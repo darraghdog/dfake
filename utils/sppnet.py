@@ -32,11 +32,12 @@ class ResNet(nn.Module):
         if layers in [18, 34]:
             self.fc = nn.Linear(512, num_class)
         if layers in [50, 101, 152]:
+            outdim = 512
             self.conv_head = nn.Sequential( \
-                nn.Conv2d(2048, 512, kernel_size=(1, 1), stride=(1, 1), bias=False), \
-                nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
+                nn.Conv2d(2048, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
       	        nn.ReLU(inplace=True))
-            self.fc = nn.Linear(512, num_class)
+            self.fc = nn.Linear(outdim, num_class)
 
     def conv_base(self, x):
         x = self.resnet.conv1(x)

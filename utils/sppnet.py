@@ -78,8 +78,11 @@ class SeNet(nn.Module):
         self.fc = nn.Linear(outdim, num_class)
 
     def conv_base(self, x):
-        
-        layer0 = self.senet.layer0(x)
+        x = self.senet.layer0.conv1(x)
+        x = self.senet.layer0.bn1(x)
+        x = self.senet.layer0.relu1(x)
+        x = self.senet.layer0.pool(x)
+        # layer0 = self.senet.layer0(x)
         layer1 = self.senet.layer1(x)
         layer2 = self.senet.layer2(layer1)
         layer3 = self.senet.layer3(layer2)

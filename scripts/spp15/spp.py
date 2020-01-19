@@ -121,7 +121,8 @@ class SPPSeqNet(nn.Module):
                  architecture = 'resnet', dense_units = 256, dropout = 0.2):
         # Only resnet is supported in this version
         super(SPPSeqNet, self).__init__()
-        self.sppnet = SPPNet(architecture, backbone=backbone, pool_size=pool_size, folder=WTSPATH)
+        logger.info('{} {} {}'.format(architecture, backbone, WTSPATH))
+        self.sppnet = SPPNet(architecture=architecture, backbone=backbone, pool_size=pool_size, folder=WTSPATH)
         self.dense_units = dense_units
         self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)

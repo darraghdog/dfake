@@ -63,12 +63,12 @@ class ResNet(nn.Module):
         return x
     
 class SeNet(nn.Module):
-    def __init__(self, folder, layers=18, num_class=2, pretrained=False, folder = None):
+    def __init__(self, layers=18, num_class=2, pretrained=False, folder = None):
         super(SeNet, self).__init__()
         
         os.environ['TORCH_HOME'] = folder
         model_func = pretrainedmodels.__dict__['se_resnext50_32x4d']
-        self.serenet = model_func(num_classes=num_class, pretrained='imagenet')
+        self.senet = model_func(num_classes=1000, pretrained='imagenet')
         self.num_class = num_class
         outdim = 512
         self.conv_head = nn.Sequential( \
@@ -79,17 +79,17 @@ class SeNet(nn.Module):
 
     def conv_base(self, x):
         
-        layer0 = self.resnet.layer0(x)
-        layer1 = self.resnet.layer1(x)
-        layer2 = self.resnet.layer2(layer1)
-        layer3 = self.resnet.layer3(layer2)
-        layer4 = self.resnet.layer4(layer3)
+        layer0 = self.senet.layer0(x)
+        layer1 = self.senet.layer1(x)
+        layer2 = self.senet.layer2(layer1)
+        layer3 = self.senet.layer3(layer2)
+        layer4 = self.senet.layer4(layer3)
         layer4 = self.conv_head(layer4)
         return layer1, layer2, layer3, layer4
 
     def forward(self, x):
         _, _, _, layer4 = self.conv_base(x)
-        x = self.resnet.avgpool(layer4)
+        x = self.senet.avgpool(layer4)
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
@@ -198,11 +198,8 @@ class SPPNet(nn.Module):
             self.c = backbones[backbone]
 
         elif  self.arch == 'seresnext':
-                self.model = SeNet(folder, num_class=num_class, pretrained=pretrained)
-            else:
-                raise ValueError('{}{} is not supported yet.'.format(self.arch, backbone))
-                
-            self.c = backbones[backbone]
+            self.model = SeNet(folder = folder, num_class=num_class, pretrained=pretrained)
+            self.c = 2048
 
         self.spp = SpatialPyramidPool2D(out_side=pool_size)
         #num_features = self.c * (pool_size[0] ** 2 + pool_size[1] ** 2 + pool_size[2] ** 2)
@@ -212,7 +209,7 @@ class SPPNet(nn.Module):
         if self.arch == 'resnet':
             _, _, _, x = self.resnet.conv_base(x)
         if self.arch == 'seresnext':
-            _, _, _, x = self.resnet.conv_base(x)
+            _, _, _, x = self.model.conv_base(x)
         elif self.arch == 'densenet':
             features = self.model.features(x)
             x = F.relu(features, inplace=True)

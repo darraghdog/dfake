@@ -8,3 +8,4 @@ spp14 - Resnet50
 tsm01 - TSM Base and with LSTM at end
 tsm02 - TSM Base parallelised
 tsm03 - TSM on SeResNext
+tsm04 - TSM Base, blockres fold_div 4

@@ -4,6 +4,8 @@ from torch import nn
 from torchvision import models
 import torch.nn.functional as F
 import os, math
+import pretrainedmodels
+# os.environ['TORCH_HOME'] = WTSPATH
 
 ''''
 folder='/Users/dhanley2/Documents/Personal/dfake/weights'
@@ -12,6 +14,86 @@ for bb in [18, 34, 50]:
     output_model_file = '{}/resnet{}.pth'.format(folder, bb)
     torch.save(mod.state_dict(), output_model_file)
 '''
+class ResNet(nn.Module):
+    def __init__(self, layers=18, num_class=2, pretrained=False, folder = None):
+        super(ResNet, self).__init__()
+        self.layers=layers
+        if layers == 18:
+            self.resnet = models.resnet18(pretrained=pretrained)
+        elif layers == 34:
+            self.resnet = models.resnet34(pretrained=pretrained)
+        elif layers == 50:
+            self.resnet = models.resnet50(pretrained=pretrained)
+        elif layers == 101:
+            self.resnet = models.resnet101(pretrained=pretrained)
+        elif layers == 152:
+            self.resnet = models.resnet152(pretrained=pretrained)
+        else:
+            raise ValueError('layers should be 18, 34, 50, 101.')
+        self.num_class = num_class
+        if layers in [18, 34]:
+            self.fc = nn.Linear(512, num_class)
+        if layers in [50, 101, 152]:
+            outdim = 512
+            self.conv_head = nn.Sequential( \
+                nn.Conv2d(2048, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
+      	        nn.ReLU(inplace=True))
+            self.fc = nn.Linear(outdim, num_class)
+
+    def conv_base(self, x):
+        x = self.resnet.conv1(x)
+        x = self.resnet.bn1(x)
+        x = self.resnet.relu(x)
+        x = self.resnet.maxpool(x)
+
+        layer1 = self.resnet.layer1(x)
+        layer2 = self.resnet.layer2(layer1)
+        layer3 = self.resnet.layer3(layer2)
+        layer4 = self.resnet.layer4(layer3)
+        if self.layers in [50, 101, 152]:
+            layer4 = self.conv_head(layer4)
+        return layer1, layer2, layer3, layer4
+
+    def forward(self, x):
+        layer1, layer2, layer3, layer4 = self.conv_base(x)
+        x = self.resnet.avgpool(layer4)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
+    
+class SeNet(nn.Module):
+    def __init__(self, folder, layers=18, num_class=2, pretrained=False, folder = None):
+        super(SeNet, self).__init__()
+        
+        os.environ['TORCH_HOME'] = folder
+        model_func = pretrainedmodels.__dict__['se_resnext50_32x4d']
+        self.serenet = model_func(num_classes=num_class, pretrained='imagenet')
+        self.num_class = num_class
+        outdim = 512
+        self.conv_head = nn.Sequential( \
+                nn.Conv2d(2048, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
+      	        nn.ReLU(inplace=True))
+        self.fc = nn.Linear(outdim, num_class)
+
+    def conv_base(self, x):
+        
+        layer0 = self.resnet.layer0(x)
+        layer1 = self.resnet.layer1(x)
+        layer2 = self.resnet.layer2(layer1)
+        layer3 = self.resnet.layer3(layer2)
+        layer4 = self.resnet.layer4(layer3)
+        layer4 = self.conv_head(layer4)
+        return layer1, layer2, layer3, layer4
+
+    def forward(self, x):
+        _, _, _, layer4 = self.conv_base(x)
+        x = self.resnet.avgpool(layer4)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
+    
 class ResNet(nn.Module):
     def __init__(self, layers=18, num_class=2, pretrained=False, folder = None):
         super(ResNet, self).__init__()
@@ -115,12 +197,21 @@ class SPPNet(nn.Module):
             backbones = {121:1024, 169:1664, 201:1920}
             self.c = backbones[backbone]
 
+        elif  self.arch == 'seresnext':
+                self.model = SeNet(folder, num_class=num_class, pretrained=pretrained)
+            else:
+                raise ValueError('{}{} is not supported yet.'.format(self.arch, backbone))
+                
+            self.c = backbones[backbone]
+
         self.spp = SpatialPyramidPool2D(out_side=pool_size)
         #num_features = self.c * (pool_size[0] ** 2 + pool_size[1] ** 2 + pool_size[2] ** 2)
         #self.classifier = nn.Linear(num_features, num_class)
 
     def forward(self, x):
         if self.arch == 'resnet':
+            _, _, _, x = self.resnet.conv_base(x)
+        if self.arch == 'seresnext':
             _, _, _, x = self.resnet.conv_base(x)
         elif self.arch == 'densenet':
             features = self.model.features(x)

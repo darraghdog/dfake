@@ -70,7 +70,7 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
-
+parser.add_option('-s', '--anneal', action="store", dest="anneal", help="Annealing peak to trough epochs", default="8")
 
 options, args = parser.parse_args()
 INPATH = options.rootpath
@@ -104,6 +104,7 @@ WTSFILES = os.path.join(INPATH, options.wtspath)
 WTSPATH = os.path.join(INPATH, options.wtspath)
 IMGDIR = os.path.join(INPATH, options.imgpath)
 EPOCHS = int(options.epochs)
+ANNEAL = int(options.anneal)
 START = int(options.start)
 LR=float(options.lr)
 LRGAMMA=float(options.lrgamma)
@@ -121,7 +122,7 @@ class SPPSeqNet(nn.Module):
                  dense_units = 256, dropout = 0.2):
         # Only resnet is supported in this version
         super(SPPSeqNet, self).__init__()
-        self.sppnet = SPPNet(backbone=backbone, pool_size=pool_size, folder=WTSPATH)
+        self.sppnet = SPPNet(backbone=34, pool_size=pool_size, folder=WTSPATH)
         self.dense_units = dense_units
         self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
@@ -294,11 +295,12 @@ def collatefn(batch):
     ids = torch.tensor([l['idx'] for l in batch])
 
     maxlen = seqlen.max()    
+    maxlen=32
     # get shapes
     d0,d1,d2,d3 = batch[0]['frames'].shape
         
     # Pad with zero frames
-    x_batch = [l['frames'] if l['frames'].shape[0] == maxlen else \
+    x_batch = [l['frames'][:32] if l['frames'].shape[0] >= maxlen else \
          torch.cat((l['frames'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
          for l,sl in zip(batch, seqlen)]
     x_batch = torch.cat([x.unsqueeze(0) for x in x_batch])
@@ -310,24 +312,24 @@ def collatefn(batch):
         return {'frames': x_batch, 'ids': ids, 'seqlen': seqlen}
     
 logger.info('Create loaders...')
-# IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
-# BATCHSIZE=2
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
-
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
-
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=16, collate_fn=collatefn)
 
 logger.info('Create model')
 poolsize=(1, 2, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
-# embedsize = 384*sum(i**2 for i in poolsize)
+from tsm import TSN
+NSEGMENT=32
+model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.5, \
+            base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
+            temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
+            partial_bn=False, consensus_type='avg', custom_weights = True)
+model.load_state_dict(torch.load( os.path.join( WTSPATH, 'tsmresnet50_base.pth' ) ))
 
-model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  dropout = 0.2, embed_size = embedsize)
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -337,7 +339,9 @@ plist = [
     ]
 optimizer = optim.Adam(plist, lr=LR)
 # scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, ANNEAL, eta_min=0, last_epoch=-1)
+# scheduler = CosineAnnealingLR(optimizer , 10, eta_min=0, last_epoch=-1)
+
 
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
@@ -347,10 +351,15 @@ for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
-    model_file_name = 'weights/sppnet_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+    model_file_name = 'weights/tsm_anneal_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
-        model.load_state_dict(torch.load(model_file_name))
-        model.to(device)
+        if epoch == (START-1):
+            model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.5, \
+                base_model='resnet50', img_feature_dim=224, pretrain='imagenet', \
+                temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
+                partial_bn=False, consensus_type='avg', custom_weights = True)
+            model.load_state_dict(torch.load(model_file_name))
+            model.to(device)
         scheduler.step()
         continue
     if INFER not in ['TST', 'EMB', 'VAL']:
@@ -361,6 +370,7 @@ for epoch in range(EPOCHS):
         model.train()  
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
+            x = x.permute(0, 1, 4, 2, 3)
             y = batch['labels'].to(device, dtype=torch.float)
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)
@@ -381,9 +391,6 @@ for epoch in range(EPOCHS):
         torch.save(model.state_dict(), model_file_name)
         scheduler.step()
     else:
-        del model
-        model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  dropout = 0.2, embed_size = embedsize)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
     if INFER in ['VAL', 'TRN']:
@@ -393,6 +400,7 @@ for epoch in range(EPOCHS):
         with torch.no_grad():
             for step, batch in enumerate(valloader):
                 x = batch['frames'].to(device, dtype=torch.float)
+                x = x.permute(0, 1, 4, 2, 3)
                 out = model(x)
                 out = torch.sigmoid(out)
                 ypredval.append(out.cpu().detach().numpy())
@@ -414,9 +422,6 @@ for epoch in range(EPOCHS):
             ypredvalbag = sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
-        logger.info('Write out bagged prediction to preds folder')
-        yvaldf = valdataset.data.iloc[valids][['video', 'label']]
-        yvaldf['pred'] = ypredval 
-        yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}.csv.gz'.format(epoch), \
-            index = False, compression = 'gzip')
         del yactval, ypredval, valids
+
+

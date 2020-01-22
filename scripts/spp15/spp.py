@@ -115,6 +115,10 @@ ACCUM=int(options.accum)
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
 
+
+n_gpu = torch.cuda.device_count()
+logger.info('Cuda n_gpus : {}'.format(n_gpu ))
+
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
     def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
@@ -341,6 +345,9 @@ scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
 
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
+
+if n_gpu > 0:
+    model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
 
 ypredvalls = []
 for epoch in range(EPOCHS):

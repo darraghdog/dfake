@@ -186,36 +186,36 @@ trn_transforms = A.Compose([
             A.GaussNoise(var_limit=(100.0, 600.0), p=p1),
             A.ISONoise(color_shift=(0.2, 0.25), intensity=(0.2, 0.25), p=p1),
             A.MultiplicativeNoise(multiplier=[0.7, 1.6], elementwise=False, per_channel=False, p=p1),
-            A.NoOp(p=p1*3),
+            #A.NoOp(p=p1*3),
             ]),
         A.OneOf([
             A.Blur(blur_limit=15, p=p1),
             A.GaussianBlur(blur_limit=15, p=p1), 
             A.MotionBlur(blur_limit=(15), p=p1), 
             A.MedianBlur(blur_limit=10, p=p1),
-            A.NoOp(p=p1*3),
+            #A.NoOp(p=p1*3),
             ]),
         A.OneOf([
              A.RandomGamma(gamma_limit=(50, 150), p=p1),
              A.RandomBrightness(limit=0.4, p=p1),
              A.RandomContrast(limit=0.4, p=p1),
-             A.NoOp(p=p1*3),
+             #A.NoOp(p=p1*3),
             ]),
         A.OneOf([
              A.JpegCompression(quality_lower=30, quality_upper=100, always_apply=False, p=p1),
              A.ImageCompression(quality_lower=30, quality_upper=100, always_apply=False, p=p1),
-             A.NoOp(p=p1*2),
+             #A.NoOp(p=p1*2),
             ]),
         A.OneOf([
              A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, drop_color=(200, 200, 200), p=p1),
              A.RandomShadow( p=p1),
-             A.NoOp(p=p1*12),
+             A.NoOp(p=p1*4),
             ]),
         A.OneOf([
             A.CoarseDropout(max_holes=50, max_height=20, max_width=20, min_height=6, min_width=6, p=p1),
             A.Cutout(num_holes=12, max_h_size=24, max_w_size=24, fill_value=255, p=p1),
             A.CLAHE(clip_limit=2.0, p=p1),
-            A.NoOp(p=p1*12),
+            A.NoOp(p=p1*4),
             ]),
     ])
 
@@ -235,9 +235,13 @@ class DFakeDataset(Dataset):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = os.listdir(imgdir)
+        trkfiles = glob.glob(os.path.join(imgdir, 'track*'))
+        logger.info(trkfiles)
+        trkfiles = pd.concat([pd.read_csv(f) for f in trkfiles], 0)
+        self.framels = trkfiles.video.unique().tolist()
         self.labels = labels
-        self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
+        #self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
+        self.data = self.data[self.data.video.isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
                                [self.data.query('label == 1')])
         self.data = self.data.sample(frac=1).reset_index(drop=True)
@@ -381,9 +385,6 @@ for epoch in range(EPOCHS):
         torch.save(model.state_dict(), model_file_name)
         scheduler.step()
     else:
-        del model
-        model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  dropout = 0.2, embed_size = embedsize)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
     if INFER in ['VAL', 'TRN']:
@@ -410,13 +411,11 @@ for epoch in range(EPOCHS):
             valloss = log_loss(yactval, ypredval.clip(c,1-c))
             logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
         for c in [.1, .01, .001] :
+            valloss = log_loss(yactval, ((ypredval)*(1-(c*2))) + c )
+            logger.info('Epoch {} val scale; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
+        for c in [.1, .01, .001] :
             BAGS=3
             ypredvalbag = sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
-        logger.info('Write out bagged prediction to preds folder')
-        yvaldf = valdataset.data.iloc[valids][['video', 'label']]
-        yvaldf['pred'] = ypredval 
-        yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}.csv.gz'.format(epoch), \
-            index = False, compression = 'gzip')
         del yactval, ypredval, valids

@@ -70,7 +70,7 @@ class SeNet(nn.Module):
         model_func = pretrainedmodels.__dict__['se_resnext50_32x4d']
         self.senet = model_func(num_classes=1000, pretrained='imagenet')
         self.num_class = num_class
-        outdim = 512
+        outdim = 256
         self.conv_head = nn.Sequential( \
                 nn.Conv2d(2048, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
                 nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \

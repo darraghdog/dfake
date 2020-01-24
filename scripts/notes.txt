@@ -1,3 +1,5 @@
+Experiments
+================
 spp08 - lots of augmentation
 spp11 - variable sized images; reduce spatial pooling to (1, 2) and (1, 2, 4)
 spp12 - reproduce spp08
@@ -10,3 +12,8 @@ tsm02 - TSM Base parallelised
 tsm03 - TSM on SeResNext
 tsm04 - TSM Base, blockres fold_div 4
 
+To try
+========
+Zero embeddings of blank image
+Inference - video start and end for batch size 
+Resnet50 face tracker at inference

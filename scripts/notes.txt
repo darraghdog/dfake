@@ -14,6 +14,7 @@ tsm04 - TSM Base, blockres fold_div 4
 
 To try
 ========
+Error analysis on face size and error - and real vs fake
 Zero embeddings of blank image
 Inference - video start and end for batch size 1
 More aug to Real images

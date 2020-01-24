@@ -15,5 +15,7 @@ tsm04 - TSM Base, blockres fold_div 4
 To try
 ========
 Zero embeddings of blank image
-Inference - video start and end for batch size 
+Inference - video start and end for batch size 1
+More aug to Real images
 Resnet50 face tracker at inference
+Seresnext on TSM

@@ -7,7 +7,7 @@ spp13 - Cosine LR schdule ~20 epochs
 spp14 - Resnet50
 spp15 - Seresnext
 spp17 - Resnet50 with masking of LSTM output
-
+spp18 - Resnet50 with masking & lookahead
 
 tsm01 - TSM Base and with LSTM at end
 tsm02 - TSM Base parallelised
@@ -21,4 +21,6 @@ Error analysis on face size and error - and real vs fake
 Inference - video start and end for batch size 1
 More aug to Real images
 Resnet50 face tracker at inference
+ImgDiff model
+Add audio features
 Seresnext on TSM

@@ -23,4 +23,6 @@ More aug to Real images
 Resnet50 face tracker at inference
 ImgDiff model
 Add audio features
+Add pose to the model - part of retinaface now
+Add face box size to model
 Seresnext on TSM

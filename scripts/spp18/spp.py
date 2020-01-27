@@ -1,4 +1,5 @@
 import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 import sys
 import glob
 import json
@@ -70,7 +71,8 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
-
+parser.add_option('-r', '--size_cap_begin', action="store", dest="size_cap_begin", help="First epoch only have images over this", default="32")
+parser.add_option('-r', '--size_cap_increment', action="store", dest="size_cap_increment", help="Increments in adding smaller images", default="0")
 
 options, args = parser.parse_args()
 INPATH = options.rootpath
@@ -111,6 +113,8 @@ LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
+SIZE_CAP_BEGIN = int(options.size_cap_begin)
+SIZE_CAP_INCREMENT = int(options.size_cap_increment)
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
@@ -236,12 +240,16 @@ transform_norm = Compose([
     ])
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
+    def __init__(self, df, framels, epoch = 0, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = os.listdir(imgdir)
+        self.framels = framels # os.listdir(imgdir)
         self.labels = labels
+        if train:
+            # Graduate to more difficult samples over the epochs
+            SIZE_FROM = SIZE_CAP_BEGIN - ( epoch * SIZE_CAP_INCREMENT )
+            self.data = self.data[self.data.maxdim>SIZE_FROM].reset_index()
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
                                [self.data.query('label == 1')])
@@ -317,17 +325,22 @@ def collatefn(batch):
         return {'frames': x_batch, 'mask': mask, 'ids': ids, 
                 'seqlen': seqlen}
     
-logger.info('Create loaders...')
-# IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
+logger.info('Create dataframes...')
+# IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg08'
 # BATCHSIZE=2
+# metadf = pd.read_csv(METAFILE)
+dimdf = pd.concat([pd.read_csv(f) for f in glob.glob(IMGDIR+'/track*')], 0)
+dimdf = dimdf.query('frame == 0').query('obj == 0')
+metadf = metadf.merge(dimdf[['video', 'maxdim']], on ='video', how = 'left')#.head()
+metadf.maxdim = metadf.maxdim.fillna(100)
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
+logger.info('Load npz file list')
+FRAMELS = [f for f in os.listdir(IMGDIR) if '.npz' in f]
 
-trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
-valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
+
+valdataset = DFakeDataset(valdf, FRAMELS, train = False, val = True, labels = False, maxlen = 32)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
-
 
 logger.info('Create model')
 poolsize=(1, 2, 6)
@@ -356,6 +369,10 @@ for epoch in range(EPOCHS):
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
     model_file_name = 'weights/sppnet_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+    
+    trndataset = DFakeDataset(trndf, FRAMELS, epoch = epoch, train = True, val = False, labels = True, maxlen = 32)
+    trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
+
     if epoch<START:
         if epoch == START-1:
             model.load_state_dict(torch.load(model_file_name))

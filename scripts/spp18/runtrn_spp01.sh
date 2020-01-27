@@ -10,5 +10,5 @@ do
             -m dbslp1897 -n 1 -R "span[ptile=4]" -o log_train_%J  sh -c "cd /share/dhanley2/dfake/scripts/$WDIR  && python3 spp.py  \
             --wtspath weights  --fold $FOLD  --rootpath /share/dhanley2/dfake/ --metafile trainmeta.csv.gz  \
             --accum $ACCUM --imgpath data/mount/npimg08 --size $SIZE --batchsize 8 --lr $LR \
-            --start 0 --epochs 12"
+            --start 0 --epochs 12 --size_cap_begin 224 --size_cap_increment 32"
 done

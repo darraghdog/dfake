@@ -79,7 +79,7 @@ INPATH = options.rootpath
 sys.path.append(os.path.join(INPATH, 'utils' ))
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg
-from utils import seqlentomask, SpatialDropout, Lookahead
+from utils import seqlentomask, SpatialDropout
 from sort import *
 from sppnet import SPPNet
 
@@ -344,7 +344,6 @@ plist = [
     {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 optimizer = optim.Adam(plist, lr=LR)
-optimizer = Lookahead(optimizer, k=5, alpha=0.5) # Initialize Lookahead
 # scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
 
@@ -358,9 +357,10 @@ for epoch in range(EPOCHS):
     logger.info('-' * 10)
     model_file_name = 'weights/sppnet_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
-        model.load_state_dict(torch.load(model_file_name))
-        model.to(device)
-        scheduler.step()
+        if epoch == START-1:
+            model.load_state_dict(torch.load(model_file_name))
+            model.to(device)
+            scheduler.step()
         continue
     if INFER not in ['TST', 'EMB', 'VAL']:
 

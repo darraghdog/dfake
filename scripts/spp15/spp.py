@@ -356,8 +356,11 @@ for epoch in range(EPOCHS):
     logger.info('-' * 10)
     model_file_name = 'weights/sppnet_seresnext_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
-        model.load_state_dict(torch.load(model_file_name))
-        model.to(device)
+        if epoch == (START - 1):
+            model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
+                  architecture = 'seresnext', dropout = 0.2, embed_size = embedsize)
+            model.load_state_dict(torch.load(model_file_name))
+            model.to(device)
         scheduler.step()
         continue
     if INFER not in ['TST', 'EMB', 'VAL']:
@@ -418,6 +421,9 @@ for epoch in range(EPOCHS):
             ypredvalbag = sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
+        logger.info('Write out bagged prediction to preds folder')
+        yvaldf = valdataset.data.iloc[valids][['video', 'label']]
+        yvaldf['pred'] = ypredval 
+        yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}.csv.gz'.format(epoch), \
+            index = False, compression = 'gzip')
         del yactval, ypredval, valids
-
-

@@ -26,5 +26,7 @@ Add simple features paper
 ImgDiff model
 Add audio features
 Seresnext on TSM
+Start with more easier samples (larger faces) and gradually move to more difficult. 
 Add pose to the model - part of retinaface now
+Extract yaw, ptich; and choose frames which minimise this
 Add face box size to model

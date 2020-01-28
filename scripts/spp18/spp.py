@@ -71,8 +71,8 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
-parser.add_option('-r', '--size_cap_begin', action="store", dest="size_cap_begin", help="First epoch only have images over this", default="32")
-parser.add_option('-r', '--size_cap_increment', action="store", dest="size_cap_increment", help="Increments in adding smaller images", default="0")
+parser.add_option('-s', '--size_cap_begin', action="store", dest="size_cap_begin", help="First epoch only have images over this", default="32")
+parser.add_option('-t', '--size_cap_increment', action="store", dest="size_cap_increment", help="Increments in adding smaller images", default="0")
 
 options, args = parser.parse_args()
 INPATH = options.rootpath
@@ -240,7 +240,7 @@ transform_norm = Compose([
     ])
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, framels, epoch = 0, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
+    def __init__(self, df, framels, imgdir = IMGDIR, epoch = 0, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir

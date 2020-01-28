@@ -8,13 +8,15 @@ spp14 - Resnet50
 spp15 - Seresnext
 spp17 - Resnet50 with masking of LSTM output
 spp18 - Resnet50 with masking & lookahead
+spp19 - Resnet50 spp14 with on pose images
+spp20 - Resnet50 spp17 with on pose images
 
 tsm01 - TSM Base and with LSTM at end
 tsm02 - TSM Base parallelised
 tsm03 - TSM on SeResNext
 tsm04 - TSM Base, blockres fold_div 4
-packet_write_wait: Connection to 10.176.24.95 port 22: Broken pipe
-LAMU02T18SPGTFM:npimg08 dhanley2$ 
+
+Ideas 
 ========
 *** Error analysis on face size and error - and real vs fake
 *** Zero embeddings of blank image
@@ -30,3 +32,5 @@ Start with more easier samples (larger faces) and gradually move to more difficu
 Add pose to the model - part of retinaface now
 Extract yaw, ptich; and choose frames which minimise this
 Add face box size to model
+Optical flow in TSM
+Center crop and random crop

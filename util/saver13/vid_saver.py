@@ -1,13 +1,5 @@
-# http://www.scikit-video.org/stable/io.html
-# https://github.com/abewley/sort
-# https://stackoverflow.com/questions/32609098/how-to-fast-change-image-brightness-with-python-opencv/50757596
-# https://github.com/danmohaha/DSP-FWA
-# http://krasserm.github.io/2018/02/07/deep-face-recognition/
-# https://docs.opencv.org/2.4/modules/highgui/doc/reading_and_writing_images_and_video.html?highlight=videocapture
-
-#!pip install scikit-video
-#!pip install dlib
-#!pip install filterpy
+# Must run 
+# !pip install torch==1.1.0
 
 import os
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
@@ -23,6 +15,7 @@ import pandas as pd
 import torch
 import torchvision
 from scipy import ndimage
+import imutils
 
 from torchvision import models, transforms
 from itertools import product, chain
@@ -261,7 +254,7 @@ if RECOVER:
 
 
 for tt, VNAME in enumerate(VIDFILES):
-    if tt>20:
+    if tt>2:
         continue
     START = datetime.datetime.now()
     try:
@@ -307,12 +300,17 @@ for tt, VNAME in enumerate(VIDFILES):
             framels = [cv2.resize(f, (int(f.shape[1]*r), int(f.shape[0]*r)), interpolation=cv2.INTER_CUBIC) for f in framels]
         # Calculate roll 
         framels = torch.cat([posetransform(f).unsqueeze(0) for f in framels])
-        logger.info(framels.shape)
-        _, _, roll = hnet(framels.to(device)) 
+        #logger.info(framels.shape)
+        yaw, pitch, roll = hnet(framels.to(device)) 
         roll = torch.nn.functional.softmax(roll)
+        yaw = torch.nn.functional.softmax(yaw)
+        pitch = torch.nn.functional.softmax(pitch)
+
         idx_tensor = [idx for idx in range(66)]
         idx_tensor = torch.FloatTensor(idx_tensor).to(device)
         trackmat['roll'] = torch.sum(torch.mul(idx_tensor, roll.data),1) * 3 - 99 
+        trackmat['yaw'] = torch.sum(torch.mul(idx_tensor, yaw.data),1) * 3 - 99 
+        trackmat['pitch'] = torch.sum(torch.mul(idx_tensor, pitch.data),1) * 3 - 99 
         
         #logger.info(trackmat)
         trackvid = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls) ))), \

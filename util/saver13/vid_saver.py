@@ -238,20 +238,31 @@ net = net.to(device)
 net.eval()
 
 hnet = Hopenet(torchvision.models.resnet.Bottleneck, [3, 4, 6, 3], 66)
-saved_state_dict = torch.load(os.path.join(WTSPATH, 'hopenet_robust_alpha1.pkl'), map_location=device )
+saved_state_dict = torch.load(os.path.join(WTSFILES, 'hopenet_robust_alpha1.pkl'), map_location=device )
 hnet.load_state_dict(saved_state_dict)
 hnet = hnet.to(device)
 hnet.eval()
+logger.info(hnet)
 
 # Get anchor frames for boxes
 logls = []
 trackls = []
 counter = 0 
-#VIDFILES = ['/share/dhanley2/dfake/data/mount/train/dfdc_train_part_28/'+i for i in ['cdaxixbosp.mp4', 'btiysiskpf.mp4', 'clihsshdkq.mp4']]
 
+'''
+RECOVER=True
+if RECOVER:
+    compls = set(os.listdir(OUTDIR))
+    logger.info('len vidfiles {}'.format(len(VIDFILES)))
+    recvrls = [v.split('/')[-1].replace('mp4', 'npz') for v in VIDFILES ]
+    VIDFILES = [v for v in VIDFILES if v not in recvrls]
+    logger.info('len vidfiles {}'.format(len(VIDFILES)))
+'''
 
 
 for tt, VNAME in enumerate(VIDFILES):
+    if tt>20:
+        continue
     START = datetime.datetime.now()
     try:
         logger.info('Process image {} : {}'.format(tt, VNAME.split('/')[-1]))
@@ -261,9 +272,9 @@ for tt, VNAME in enumerate(VIDFILES):
         trackmat, faces = gettrack(thumbls, FPS//4, h, w, BATCHSIZE*2)
         # If downsizing does not work, try with the original image 
         if len(trackmat)<5 and max(H,W)<2000:
-            trackmat, faces = gettrack(imgls, FPS//4, H, W, BATCHSIZE)
+            trackmat, faces = gettrack(imgls, FPS//4, H, W, BATCHSIZE//2)
             if len(trackmat)<5 and max(H,W)<2000:
-                trackmat, faces = gettrack(imgls, FPS//8, H, W, BATCHSIZE)  
+                trackmat, faces = gettrack(imgls, FPS//8, H, W, BATCHSIZE//2)  
         else:
             trackmat[['x1', 'x2']] = (trackmat[['x1', 'x2']]*(W/w)).astype(np.int32)
             trackmat[['y1', 'y2']] = (trackmat[['y1', 'y2']]*(H/h)).astype(np.int32)
@@ -271,7 +282,7 @@ for tt, VNAME in enumerate(VIDFILES):
         trackmat[['x1', 'x2']] = trackmat[['x1', 'x2']].clip(0, W)
         trackmat[['y1', 'y2']] = trackmat[['y1', 'y2']].clip(0, H)
         '''
-        Get roll
+        #Get roll
         '''
         # First align to common size
         trackmat['dimx'], trackmat['dimy'] = H, W
@@ -296,7 +307,8 @@ for tt, VNAME in enumerate(VIDFILES):
             framels = [cv2.resize(f, (int(f.shape[1]*r), int(f.shape[0]*r)), interpolation=cv2.INTER_CUBIC) for f in framels]
         # Calculate roll 
         framels = torch.cat([posetransform(f).unsqueeze(0) for f in framels])
-        _, _, roll = hnet(framels) 
+        logger.info(framels.shape)
+        _, _, roll = hnet(framels.to(device)) 
         roll = torch.nn.functional.softmax(roll)
         idx_tensor = [idx for idx in range(66)]
         idx_tensor = torch.FloatTensor(idx_tensor).to(device)
@@ -346,8 +358,7 @@ for tt, VNAME in enumerate(VIDFILES):
         STATUS = 'fail'
     DURATION = int((END-START).total_seconds())
     logls.append([VNAME.split('/')[-1], N_OBJ, N_FACES, DURATION, STATUS])
-    
-    
+
 logdf = pd.DataFrame(logls, columns = ['video', 'objectct', 'framect', 'duration', 'status'])
 trackdf = pd.concat(trackls, 0)
 trackdf['video'] = trackdf['video'].apply(lambda x: x.split('/')[-1])

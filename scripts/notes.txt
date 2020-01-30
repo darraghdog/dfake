@@ -24,11 +24,12 @@ Inference - video start and end for batch size 1
 Use try and except for the gpu part of previous point
 More aug to Real images
 Add simple features paper
+Try zoom augmentation
 *** Resnet50 face tracker at inference
 ImgDiff model
 Add audio features
 Seresnext on TSM
-Start with more easier samples (larger faces) and gradually move to more difficult. 
+*** Start with more easier samples (larger faces) and gradually move to more difficult. 
 Add pose to the model - part of retinaface now
 Extract yaw, ptich; and choose frames which minimise this
 Add face box size to model

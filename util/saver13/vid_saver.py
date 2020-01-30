@@ -235,7 +235,7 @@ saved_state_dict = torch.load(os.path.join(WTSFILES, 'hopenet_robust_alpha1.pkl'
 hnet.load_state_dict(saved_state_dict)
 hnet = hnet.to(device)
 hnet.eval()
-logger.info(hnet)
+logger.info(device)
 
 # Get anchor frames for boxes
 logls = []
@@ -254,8 +254,6 @@ if RECOVER:
 
 
 for tt, VNAME in enumerate(VIDFILES):
-    if tt>2:
-        continue
     START = datetime.datetime.now()
     try:
         logger.info('Process image {} : {}'.format(tt, VNAME.split('/')[-1]))
@@ -308,9 +306,9 @@ for tt, VNAME in enumerate(VIDFILES):
 
         idx_tensor = [idx for idx in range(66)]
         idx_tensor = torch.FloatTensor(idx_tensor).to(device)
-        trackmat['roll'] = torch.sum(torch.mul(idx_tensor, roll.data),1) * 3 - 99 
-        trackmat['yaw'] = torch.sum(torch.mul(idx_tensor, yaw.data),1) * 3 - 99 
-        trackmat['pitch'] = torch.sum(torch.mul(idx_tensor, pitch.data),1) * 3 - 99 
+        trackmat['roll'] = (torch.sum(torch.mul(idx_tensor, roll.data),1) * 3 - 99).cpu()
+        trackmat['yaw'] = (torch.sum(torch.mul(idx_tensor, yaw.data),1) * 3 - 99).cpu()
+        trackmat['pitch'] = (torch.sum(torch.mul(idx_tensor, pitch.data),1) * 3 - 99).cpu()
         
         #logger.info(trackmat)
         trackvid = pd.DataFrame(list(product(trackmat.obj.unique(), range(len(imgls) ))), \
@@ -363,7 +361,8 @@ trackdf['video'] = trackdf['video'].apply(lambda x: x.split('/')[-1])
 logdf.to_csv(os.path.join(OUTDIR, 'log_fold{}.txt'.format(FOLD)), index = False)
 trackdf.to_csv(os.path.join(OUTDIR, 'tracker_fold{}.txt'.format(FOLD)), index = False)
 
-
+'''
 FACENP = glob.glob(os.path.join(INPATH, 'data/npimg/*.npz'))
 framesls = [np.load(f)['arr_0'][0] for f in tqdm(FACENP)]
 Image.fromarray(np.concatenate(framesls, 0))
+'''

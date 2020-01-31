@@ -221,17 +221,17 @@ counter = 0
 
 for tt, VNAME in enumerate(VIDFILES):
     START = datetime.datetime.now()
+    if tt>10:
+        continue
     try:
         logger.info('Process image {} : {}'.format(tt, VNAME.split('/')[-1]))
         imgls, H, W = vid2imgls(VNAME, FPS, MAXLOADSECONDS)
         # For most images we do not need the full size to find the boxes
         thumbls, h, w = imresizels(imgls, H, W, MAXDIM = 1280)
-        trackmat, faces = gettrack(thumbls, FPS//4, h, w, BATCHSIZE*2)
+        trackmat, faces = gettrack(thumbls, FPS//4, h, w, BATCHSIZE)
         # If downsizing does not work, try with the original image 
         if len(trackmat)<5 and max(H,W)<2000:
-            trackmat, faces = gettrack(imgls, FPS//4, H, W, BATCHSIZE)
-            if len(trackmat)<5 and max(H,W)<2000:
-                trackmat, faces = gettrack(imgls, FPS//8, H, W, BATCHSIZE)  
+            trackmat, faces = gettrack(imgls, FPS//8, H, W, BATCHSIZE)  
         else:
             trackmat[['x1', 'x2']] = (trackmat[['x1', 'x2']]*(W/w)).astype(np.int32)
             trackmat[['y1', 'y2']] = (trackmat[['y1', 'y2']]*(H/h)).astype(np.int32)
@@ -251,12 +251,16 @@ for tt, VNAME in enumerate(VIDFILES):
         trackvid['video']=VNAME
         trackvid['maxdim'] = pd.concat([trackvid.x2-trackvid.x1, trackvid.y2-trackvid.y1], axis=1).max(axis=1)
         #logger.info(trackvid.iloc[0])
-        imgdict = collections.OrderedDict((o, []) for o in range(1+trackvid.obj.max()))         
+        imgdict = collections.OrderedDict((o, []) for o in range(1+trackvid.obj.max()))  
+        B = 300
         for (t, row) in trackvid.iterrows():
             obj = row.obj
             frame = imgls[row.frame]
-            face = frame[row.y1:row.y1+row.maxdim, row.x1:row.x1+row.maxdim]
-            face = cv2.resize(face, (SIZE,SIZE), interpolation=cv2.INTER_CUBIC)
+            frame = cv2.copyMakeBorder( imgls[int(row.frame)], B, B, B, B, cv2.BORDER_CONSTANT)
+            face = frame[(row.y1+B)-(row.maxdim//2) : (row.y1+B)+(row.maxdim//2), \
+                         (row.x1+B)-(row.maxdim//2) : (row.x1+B)+(row.maxdim//2)]
+            #face = face[B:face.shape[0]-B, B:face.shape[1]-B]
+            #face = cv2.resize(face, (SIZE,SIZE), interpolation=cv2.INTER_CUBIC)
             imgdict[obj].append(face)
         trackfaces = np.array(sum(list(imgdict.values()), []))
         trackvid = trackvid.sort_values(['obj', 'frame'], 0).reset_index(drop=True)

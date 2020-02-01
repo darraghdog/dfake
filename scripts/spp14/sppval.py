@@ -162,22 +162,21 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def snglaugfn(imgdim):
+def snglaugfn():
     rot = random.randrange(-10, 10)
-    dim1 = random.uniform(0.5, 1.0)
-    dim2 = random.randrange(int(imgdim*0.75), imgdim)
+    dim1 = random.uniform(0.7, 1.0)
+    dim2 = random.randrange(int(SIZE)*0.75, SIZE)
     return Compose([
         ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
-        CenterCrop(int(imgdim*dim1), int(imgdim*dim1), always_apply=False, p=0.8), 
+        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
         Resize(dim2, dim2, interpolation=1,  p=0.5),
         Resize(SIZE, SIZE, interpolation=1,  p=1),
         ])
-
-val_transforms = Compose([
-    NoOp(),
-    Resize(SIZE, SIZE, interpolation=1,  p=1), 
-    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
-    ])
+def ttacropfn(border):
+    return Compose([
+        CenterCrop(int(SIZE-border), int(SIZE*border), always_apply=True, p=1.0),
+        Resize(SIZE, SIZE, interpolation=1,  p=1),
+        ])
 
 mean_img = [0.4258249 , 0.31385377, 0.29170314]
 std_img = [0.22613944, 0.1965406 , 0.18660679]
@@ -225,6 +224,11 @@ trn_transforms = A.Compose([
             ]),
     ])
 
+val_transforms = Compose([
+    NoOp(),
+    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
+    ])
+
 transform_norm = Compose([
     #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
@@ -232,11 +236,11 @@ transform_norm = Compose([
     ])
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, framels, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
+    def __init__(self, df, imgdir, ttacrop=0, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = framels #os.listdir(imgdir)
+        self.framels = os.listdir(imgdir)
         self.labels = labels
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
@@ -248,6 +252,7 @@ class DFakeDataset(Dataset):
         self.snglaug = snglaugfn
         self.train = train
         self.val = val
+        self.ttacrop = ttacrop
         self.norm = transform_norm
         self.transform = trn_transforms if not val else val_transforms
   
@@ -262,7 +267,6 @@ class DFakeDataset(Dataset):
             frames = np.load(fname)['arr_0']
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
-            logger.info(frames.shape)
             if self.train and (d0>self.maxlen):
                 xtra = frames.shape[0]-self.maxlen
                 shift = random.randint(0, xtra)
@@ -272,9 +276,13 @@ class DFakeDataset(Dataset):
             d0,d1,d2,d3 = frames.shape
             augsngl = self.snglaug
             # Standard augmentation on each image
-            augfn = self.snglaug(d2)
-            if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
-            d0,d1,d2,d3 = frames.shape
+            augfn = self.snglaug()
+            if self.train : 
+                frames = np.stack([augfn(image=f)['image'] for f in frames])
+            else:
+                if self.ttacrop>0:
+                    augfn = ttacropfn(self.ttacrop)
+                    frames = np.stack([augfn(image=f)['image'] for f in frames])
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:
                 augmented = self.transform(image=frames)
@@ -282,7 +290,6 @@ class DFakeDataset(Dataset):
             augmented = self.norm(image=frames)
             frames = augmented['image']
             frames = frames.resize_(d0,d1,d2,d3)
-            logger.info(frames.shape)
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    
@@ -318,10 +325,9 @@ logger.info('Create loaders...')
 # BATCHSIZE=2
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
-framels = os.listdir(IMGDIR)
 
-trndataset = DFakeDataset(trndf, IMGDIR, framels, train = True, val = False, labels = True, maxlen = 32)
-valdataset = DFakeDataset(valdf, IMGDIR, framels, train = False, val = True, labels = False, maxlen = 32)
+trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
+valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
@@ -331,25 +337,20 @@ poolsize=(1, 2, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
 # embedsize = 384*sum(i**2 for i in poolsize)
 
-def construct_model():
-    model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
+model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
                   dropout = 0.2, embed_size = embedsize)
-    model = model.to(device)
-    param_optimizer = list(model.named_parameters())
-    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
-    plist = [
-        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': DECAY},
-        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-        ]
-    optimizer = optim.Adam(plist, lr=LR)
-    # scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
-    model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
-    for i in range(START-1):
-        scheduler.step()
-    return model, optimizer, scheduler
+model = model.to(device)
+param_optimizer = list(model.named_parameters())
+no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+plist = [
+    {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': DECAY},
+    {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+    ]
+optimizer = optim.Adam(plist, lr=LR)
+# scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
 
-model, optimizer, scheduler = construct_model()
+model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
 
 ypredvalls = []
@@ -359,10 +360,9 @@ for epoch in range(EPOCHS):
     logger.info('-' * 10)
     model_file_name = 'weights/sppnet_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
-        del model, optimizer, scheduler
-        model, optimizer, scheduler = construct_model()
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
+        scheduler.step()
         continue
     if INFER not in ['TST', 'EMB', 'VAL']:
 
@@ -401,26 +401,27 @@ for epoch in range(EPOCHS):
         model.eval()
         ypredval = []
         valids = [] 
-        with torch.no_grad():
-            for step, batch in enumerate(valloader):
-                x = batch['frames'].to(device, dtype=torch.float)
-                out = model(x)
-                out = torch.sigmoid(out)
-                ypredval.append(out.cpu().detach().numpy())
-                valids.append(batch['ids'].cpu().detach().numpy())
-                if step%200==0:
-                    logger.info('Val step {} of {}'.format(step, len(valloader)))    
-        ypredval = np.concatenate(ypredval).flatten()
-        valids = np.concatenate(valids).flatten()
-        ypredvalls.append(ypredval)
-        yactval = valdataset.data.iloc[valids].label.values
-        logger.info('Actuals {}'.format(yactval[:8]))
-        logger.info('Preds {}'.format(ypredval[:8]))
-        logger.info('Ids {}'.format(valids[:8]))
-        for c in [.1, .01, .001] :
-            valloss = log_loss(yactval, ypredval.clip(c,1-c))
+        for border in [0, 16, 32]:
+            with torch.no_grad():
+                for step, batch in enumerate(valloader):
+                    x = batch['frames'].to(device, dtype=torch.float)
+                    out = model(x)
+                    out = torch.sigmoid(out)
+                    ypredval.append(out.cpu().detach().numpy())
+                    valids.append(batch['ids'].cpu().detach().numpy())
+                    if step%200==0:
+                        logger.info('Val step {} of {}'.format(step, len(valloader)))    
+            yredval = np.concatenate(ypredval).flatten()
+            valids = np.concatenate(valids).flatten()
+            ypredvalls.append(ypredval)
+            yactval = valdataset.data.iloc[valids].label.values
+            logger.info('Actuals {}'.format(yactval[:8]))
+            logger.info('Preds {}'.format(ypredval[:8]))
+            logger.info('Ids {}'.format(valids[:8]))
+            for c in [.1, .01, .001] :
+                valloss = log_loss(yactval, ypredval.clip(c,1-c))
             logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
-        for c in [.1, .01, .001] :
+            for c in [.1, .01, .001] :
             BAGS=3
             ypredvalbag = sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))

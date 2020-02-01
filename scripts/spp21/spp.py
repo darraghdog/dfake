@@ -70,6 +70,7 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
+parser.add_option('-s', '--crop', action="store", dest="crop", help="crop", default="0")
 
 
 options, args = parser.parse_args()
@@ -110,6 +111,7 @@ LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
+CROP=int(options.crop)
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
@@ -138,7 +140,6 @@ class SPPSeqNet(nn.Module):
         # Split back out to batch
         emb = emb.view(batch_size, seqlen, emb.size()[1])
         emb = self.embedding_dropout(emb)
-        
         # Pass batch thru sequential model(s)
         h_lstm1, _ = self.lstm1(emb)
         max_pool, _ = torch.max(h_lstm1, 1)
@@ -162,22 +163,16 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def snglaugfn(imgdim):
-    rot = random.randrange(-10, 10)
-    dim1 = random.uniform(0.5, 1.0)
-    dim2 = random.randrange(int(imgdim*0.75), imgdim)
+def snglaugfn():
+    #rot = random.randrange(-10, 10)
+    dim1 = random.uniform(0.6, 1.0)
+    dim2 = random.randrange(int(SIZE)*0.75, SIZE)
     return Compose([
-        ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
-        CenterCrop(int(imgdim*dim1), int(imgdim*dim1), always_apply=False, p=0.8), 
+        #ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
+        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=1.0), 
         Resize(dim2, dim2, interpolation=1,  p=0.5),
         Resize(SIZE, SIZE, interpolation=1,  p=1),
         ])
-
-val_transforms = Compose([
-    NoOp(),
-    Resize(SIZE, SIZE, interpolation=1,  p=1), 
-    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
-    ])
 
 mean_img = [0.4258249 , 0.31385377, 0.29170314]
 std_img = [0.22613944, 0.1965406 , 0.18660679]
@@ -225,6 +220,11 @@ trn_transforms = A.Compose([
             ]),
     ])
 
+val_transforms = Compose([
+    NoOp(),
+    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
+    ])
+
 transform_norm = Compose([
     #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
@@ -262,7 +262,6 @@ class DFakeDataset(Dataset):
             frames = np.load(fname)['arr_0']
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
-            logger.info(frames.shape)
             if self.train and (d0>self.maxlen):
                 xtra = frames.shape[0]-self.maxlen
                 shift = random.randint(0, xtra)
@@ -272,9 +271,10 @@ class DFakeDataset(Dataset):
             d0,d1,d2,d3 = frames.shape
             augsngl = self.snglaug
             # Standard augmentation on each image
-            augfn = self.snglaug(d2)
-            if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
+            augfn = self.snglaug()
+            frames = np.stack([f[CROP:-CROP, CROP:-CROP] for f in frames])
             d0,d1,d2,d3 = frames.shape
+            if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:
                 augmented = self.transform(image=frames)
@@ -282,7 +282,6 @@ class DFakeDataset(Dataset):
             augmented = self.norm(image=frames)
             frames = augmented['image']
             frames = frames.resize_(d0,d1,d2,d3)
-            logger.info(frames.shape)
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    
@@ -327,7 +326,7 @@ valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_wo
 
 
 logger.info('Create model')
-poolsize=(1, 2, 6)
+poolsize=(1, 2)#, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
 # embedsize = 384*sum(i**2 for i in poolsize)
 
@@ -373,6 +372,7 @@ for epoch in range(EPOCHS):
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
             y = batch['labels'].to(device, dtype=torch.float)
+            # logger.info(x.shape)
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)

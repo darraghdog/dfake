@@ -115,13 +115,31 @@ ACCUM=int(options.accum)
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
+
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
 
-'''
 
-from deepfake.data.processing import load_folds, get_real_to_fake_dict_v2, get_cluster_data
+METADATA_PATH=os.path.join(INPATH, 'data/splits')
+real_set, fake_set, real_to_fake = get_real_to_fake_dict_v2(METADATA_PATH)
+REAL_VIDEO_TO_CLUSTER, FAKE_VIDEO_TO_CLUSTER, CLUSTER_TO_REAL_VIDEOS, \
+            CLUSTER_TO_FAKE_VIDEOS, CLUSTER_TO_DESCRIPTOR = \
+            get_cluster_data(METADATA_PATH)
+video_to_cluster = {}
+video_to_cluster.update(REAL_VIDEO_TO_CLUSTER)
+video_to_cluster.update(FAKE_VIDEO_TO_CLUSTER)
+folds_data = load_folds(METADATA_PATH)
 
-'''
+logger.info('Join Vladislavs folds ')
+foldsdf = pd.DataFrame(sum([[[i,k] for k in j] for i,j in folds_data.items()], []), columns = ['fold', 'cluster'])
+vidclust = pd.DataFrame(pd.Series(video_to_cluster, name = 'cluster'))
+foldsdf = pd.merge(foldsdf, vidclust.reset_index(), on='cluster')
+foldsdf = foldsdf.rename(columns={'index': 'video'})
+foldsdf.shape
+metadf = metadf.drop(['fold', 'cluster'], 1)
+metadf.video = metadf.video.str.replace('.mp4', '')
+metadf = foldsdf.merge(metadf, on='video' )
+logger.info('Vladislavs folds {} {}'.format(*metadf.shape))
+
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
@@ -170,20 +188,26 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def snglaugfn():
+def snglaugfntrn():
     rot = random.randrange(-10, 10)
     dim1 = random.uniform(0.7, 1.0)
     dim2 = random.randrange(int(SIZE)*0.75, SIZE)
     return Compose([
+        Resize(SIZE, SIZE, interpolation=3,  p=1),
         ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
         CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
-        Resize(dim2, dim2, interpolation=1,  p=0.5),
-        Resize(SIZE, SIZE, interpolation=1,  p=1),
+        Resize(dim2, dim2, interpolation=3,  p=0.5),
+        Resize(SIZE, SIZE, interpolation=3,  p=1),
         ])
 
+def snglaugfnval():
+    return Compose([
+        Resize(SIZE, SIZE, interpolation=3,  p=1),
+        ])
+'''
 mean_img = [0.4258249 , 0.31385377, 0.29170314]
 std_img = [0.22613944, 0.1965406 , 0.18660679]
-
+'''
 p1 = 0.1
 trn_transforms = A.Compose([
         A.HorizontalFlip(p=0.5),
@@ -237,26 +261,49 @@ transform_norm = Compose([
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
     ToTensor()
     ])
+
     
+dir_ = '/Users/dhanley2/Documents/Personal/dfake/data/prepared_data_v4/aligned_faces'
+
+'''
+ONDISK = [i[0].split('/')[-1] for i in os.walk(dir_)]
+logger.info(f'Length on disk {len(ONDISK)}')
+metadf[metadf.video.isin(ONDISK)]
+'''
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
+    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, \
+                 labels = False, maxlen = 32, is_RGB = False):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = os.listdir(imgdir)
+        # self.framels = os.listdir(imgdir)
+        # '/Users/dhanley2/Documents/Personal/dfake/data/prepared_data_v4/aligned_faces'
+        self.framels = [i[0].split('/')[-1] for i in os.walk(dir_)]
         self.labels = labels
-        self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
+        #self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
+        self.data = self.data[self.data.video.isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
                                [self.data.query('label == 1')])
         self.data = self.data.sample(frac=1).reset_index(drop=True)
         # self.data = pd.concat([ self.data[self.data.video.str.contains('qirlrtrxba')],  self.data[:500].copy() ]).reset_index(drop=True)
         self.maxlen = maxlen
         logger.info('Expand the REAL class {} {}'.format(*self.data.shape))
-        self.snglaug = snglaugfn
+        self.snglaug = snglaugfntrn if not val else snglaugfnval
         self.train = train
         self.val = val
-        self.norm = transform_norm
+        if is_RGB:
+            self.means = [0.485, 0.456, 0.406]
+            self.stds = [0.229, 0.224, 0.225]
+        else:
+            self.means = [0.485, 0.456, 0.406][::-1]
+            self.stds = [0.229, 0.224, 0.225][::-1]
+        self.norm = Compose([
+                Normalize(mean=self.means, std=self.stds, max_pixel_value=255.0, p=1.0),
+                ToTensor()])
         self.transform = trn_transforms if not val else val_transforms
+
+
+        
   
     def __len__(self):
         return len(self.data)
@@ -264,28 +311,29 @@ class DFakeDataset(Dataset):
     def __getitem__(self, idx):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
-        fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
+        fname = os.path.join(self.imgdir, vid.video)
         try:
-            frames = np.load(fname)['arr_0']
+            #frames = np.load(fname)['arr_0']
+            # fname=INPATH+'/data/prepared_data_v4/aligned_faces/zplyjqnfmv'
+            jpgls = os.listdir(fname)
+            jpgls = [x for _,x in sorted(zip(map(lambda x: int(x.split('_')[0]), jpgls), jpgls))]
             # Cut the frames to max 37 with a sliding window
-            d0,d1,d2,d3 = frames.shape
-            if self.train and (d0>self.maxlen):
-                xtra = frames.shape[0]-self.maxlen
+            if self.train and (len(jpgls)>self.maxlen):
+                xtra = len(jpgls)-self.maxlen # self.maxlen
                 shift = random.randint(0, xtra)
-                frames = frames[xtra-shift:xtra-shift+self.maxlen]
+                frames = jpgls[xtra-shift:xtra-shift+self.maxlen]
             else:
+                # simulate submission - first 32 frames only
                 frames = frames[:self.maxlen]
+            augfn = self.snglaug() # snglaugfntrn() 
+            frames = [cv2.imread(os.path.join(fname, f)) for f in frames]
+            frames = np.stack([augfn(image=f.copy())['image'] for f in frames])
             d0,d1,d2,d3 = frames.shape
-            augsngl = self.snglaug
             # Standard augmentation on each image
-            augfn = self.snglaug()
-            if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
             frames = frames.reshape(d0*d1, d2, d3)
-            if self.train or self.val:
-                augmented = self.transform(image=frames)
-                frames = augmented['image']               
-            augmented = self.norm(image=frames)
-            frames = augmented['image']
+            augmented = self.transform(image=frames)['image'] 
+            frames = augmented              
+            frames = self.norm(image=frames)['image']
             frames = frames.resize_(d0,d1,d2,d3)
             if self.train:
                 labels = torch.tensor(vid.label)

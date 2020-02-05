@@ -255,13 +255,13 @@ val_transforms = Compose([
     NoOp(),
     #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
-
+'''
 transform_norm = Compose([
     #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
     ToTensor()
     ])
-
+'''
     
 dir_ = '/Users/dhanley2/Documents/Personal/dfake/data/prepared_data_v4/aligned_faces'
 
@@ -278,7 +278,7 @@ class DFakeDataset(Dataset):
         self.imgdir = imgdir
         # self.framels = os.listdir(imgdir)
         # '/Users/dhanley2/Documents/Personal/dfake/data/prepared_data_v4/aligned_faces'
-        self.framels = [i[0].split('/')[-1] for i in os.walk(dir_)]
+        self.framels = [i[0].split('/')[-1] for i in os.walk(self.imgdir)]
         self.labels = labels
         #self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = self.data[self.data.video.isin(self.framels)]
@@ -302,9 +302,6 @@ class DFakeDataset(Dataset):
                 ToTensor()])
         self.transform = trn_transforms if not val else val_transforms
 
-
-        
-  
     def __len__(self):
         return len(self.data)
     

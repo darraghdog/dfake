@@ -189,8 +189,8 @@ In this dataset, no video was subjected to more than one augmentation.
 '''
 
 def snglaugfntrn():
-    rot = random.randrange(-10, 10)
-    dim1 = random.uniform(0.7, 1.0)
+    rot = random.randrange(-5, 5)
+    dim1 = random.uniform(0.8, 1.0)
     dim2 = random.randrange(int(SIZE)*0.75, SIZE)
     return Compose([
         Resize(SIZE, SIZE, interpolation=3,  p=1),
@@ -211,43 +211,41 @@ std_img = [0.22613944, 0.1965406 , 0.18660679]
 p1 = 0.1
 trn_transforms = A.Compose([
         A.HorizontalFlip(p=0.5),
-        A.OneOf([
-            A.Downscale(scale_min=0.5, scale_max=0.9, interpolation=0, always_apply=False, p=0.5),
-            ]),
+        A.Downscale(scale_min=0.5, scale_max=0.9, interpolation=0, always_apply=False, p=0.5),
         A.OneOf([
             A.GaussNoise(var_limit=(100.0, 600.0), p=p1),
             A.ISONoise(color_shift=(0.2, 0.25), intensity=(0.2, 0.25), p=p1),
             A.MultiplicativeNoise(multiplier=[0.7, 1.6], elementwise=False, per_channel=False, p=p1),
-            A.NoOp(p=p1*3),
+            A.NoOp(p=p1*6),
             ]),
         A.OneOf([
             A.Blur(blur_limit=15, p=p1),
             A.GaussianBlur(blur_limit=15, p=p1), 
             A.MotionBlur(blur_limit=(15), p=p1), 
             A.MedianBlur(blur_limit=10, p=p1),
-            A.NoOp(p=p1*3),
+            A.NoOp(p=p1*6),
             ]),
         A.OneOf([
              A.RandomGamma(gamma_limit=(50, 150), p=p1),
              A.RandomBrightness(limit=0.4, p=p1),
              A.RandomContrast(limit=0.4, p=p1),
-             A.NoOp(p=p1*3),
+             A.NoOp(p=p1*6),
             ]),
         A.OneOf([
              A.JpegCompression(quality_lower=30, quality_upper=100, always_apply=False, p=p1),
              A.ImageCompression(quality_lower=30, quality_upper=100, always_apply=False, p=p1),
-             A.NoOp(p=p1*2),
+             A.NoOp(p=p1*6),
             ]),
         A.OneOf([
              A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, drop_color=(200, 200, 200), p=p1),
              A.RandomShadow( p=p1),
-             A.NoOp(p=p1*12),
+             A.NoOp(p=p1*20),
             ]),
         A.OneOf([
             A.CoarseDropout(max_holes=50, max_height=20, max_width=20, min_height=6, min_width=6, p=p1),
             A.Cutout(num_holes=12, max_h_size=24, max_w_size=24, fill_value=255, p=p1),
             A.CLAHE(clip_limit=2.0, p=p1),
-            A.NoOp(p=p1*12),
+            A.NoOp(p=p1*20),
             ]),
     ])
 
@@ -297,15 +295,14 @@ class DFakeDataset(Dataset):
         else:
             self.means = [0.485, 0.456, 0.406][::-1]
             self.stds = [0.229, 0.224, 0.225][::-1]
-        #'''
+        '''
         self.norm = Compose([
                 Normalize(mean=self.means, std=self.stds, max_pixel_value=255.0, p=1.0),
                 ToTensor()])
-        #'''
-        #self.norm =  Compose(
-        #    [ToTensor(),
-        #     Normalize(mean=self.means, std=self.stds)])
-
+        '''
+        self.norm =  Compose(
+            [ToTensor(),
+             Normalize(mean=self.means, std=self.stds)])
         self.transform = trn_transforms if not val else val_transforms
 
     def __len__(self):
@@ -327,7 +324,7 @@ class DFakeDataset(Dataset):
                 frames = jpgls[xtra-shift:xtra-shift+self.maxlen]
             else:
                 # simulate submission - first 32 frames only
-                frames = jpgls[:self.maxlen]
+                frames = frames[:self.maxlen]
             augfn = self.snglaug() # snglaugfntrn() 
             frames = [cv2.imread(os.path.join(fname, f)) for f in frames]
             frames = np.stack([augfn(image=f.copy())['image'] for f in frames])
@@ -406,7 +403,7 @@ for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
-    model_file_name = 'weights/sppnet_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+    model_file_name = 'weights/sppnet_loaug_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)

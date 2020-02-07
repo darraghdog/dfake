@@ -80,6 +80,7 @@ INPATH = options.rootpath
 sys.path.append(os.path.join(INPATH, 'utils' ))
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
+from utils import alignment_v2
 from sort import *
 from sppnet import SPPNet
 from splits import  load_folds, get_real_to_fake_dict_v2, get_cluster_data
@@ -140,6 +141,12 @@ metadf.video = metadf.video.str.replace('.mp4', '')
 metadf = foldsdf.merge(metadf, on='video' )
 logger.info('Vladislavs folds {} {}'.format(*metadf.shape))
 
+annos = glob.glob(os.path.join(imgdir,'../annotations'))
+annos = [loadobj(a) for a in annos]
+annodict = {}
+for d in annos: 
+    annodict.update(d)
+annodict = dict((k.split('/')[-1], v) for k,v in annodict.items())
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
@@ -272,7 +279,9 @@ metadf[metadf.video.isin(ONDISK)]
 '''
 class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, \
-                 labels = False, maxlen = 32, is_RGB = False):
+                 labels = False, maxlen = 32, is_RGB = False, annos=annodict):
+        #imgdir='/Users/dhanley2/Documents/Personal/dfake/data/debug/anno'
+        self.annos = annodict
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
@@ -315,9 +324,36 @@ class DFakeDataset(Dataset):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video)
+        curr_video_annotation = self.annos[vid.video]
+        
         try:
+            
+            if self.train and (len(vidannos.keys())>self.maxlen):
+                xtra = len(vidannos.keys())-self.maxlen # self.maxlen
+            else:
+                # simulate submission - first 32 frames only
+                xtra = 0
+            shift = random.randint(0, xtra)
+            curr_video_annotation = dict((k,v) for t,(k,v) in enumerate(vidannos.items()) if  xtra-shift <= t < self.maxlen)
+            for key in list(curr_video_annotation.keys()):
+                exp_boxes_squared, new_boxes, new_lmks, final_boxes, final_lmks, final_scores = curr_video_annotation[key]
+                for face_idx, (box, lmks) in enumerate(zip(new_boxes, new_lmks)):
+                    im_source = cv2.imread(f'{self.imgdir}/{video_name}/{key}_{face_idx}.jpg')
+                    logger.info(im_source)
+                    im_352 = alignment_v2(im_source,
+                                                      lmks,
+                                                      ncols=scale * 112,
+                                                      nrows=scale * 112,
+                                                      plus_x=shift,
+                                                      plus_y=shift,
+                                                      crop_x=shift * scale * 2,
+                                                      crop_y=shift * scale * 2)
+                framels.append(im_352)
+            
+            #frames = jpgls[xtra-shift:xtra-shift+self.maxlen]
             #frames = np.load(fname)['arr_0']
             # fname=INPATH+'/data/prepared_data_v4/aligned_faces/zplyjqnfmv'
+            '''
             jpgls = os.listdir(fname)
             jpgls = [x for _,x in sorted(zip(map(lambda x: int(x.split('_')[0]), jpgls), jpgls))]
             # Cut the frames to max 37 with a sliding window
@@ -328,8 +364,9 @@ class DFakeDataset(Dataset):
             else:
                 # simulate submission - first 32 frames only
                 frames = jpgls[:self.maxlen]
-            augfn = self.snglaug() # snglaugfntrn() 
             frames = [cv2.imread(os.path.join(fname, f)) for f in frames]
+            '''
+            augfn = self.snglaug() # snglaugfntrn() 
             frames = np.stack([augfn(image=f.copy())['image'] for f in frames])
             d0,d1,d2,d3 = frames.shape
             # Standard augmentation on each image

@@ -5,7 +5,44 @@ from torchvision import models
 import torch.nn.functional as F
 import os, math
 import pretrainedmodels
+device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # os.environ['TORCH_HOME'] = WTSPATH
+from shufflenet_v2_plus import ShuffleNetV2_Plus as shufflenetv2plus
+
+
+'''
+model=shufflenetv2plus(model_size='Large',  device = device)
+model.conv_last = nn.Sequential( \
+                        nn.Conv2d(672, 512, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                        nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
+                        nn.ReLU(inplace=True))
+x = torch.zeros(2,3,224,224)
+out = model(x)
+out.shape
+'''
+
+class ShuffleNet(nn.Module):
+    def __init__(self, layers=18, num_class=2, pretrained=False, \
+                 folder = None):
+        super(ShuffleNet, self).__init__()
+        
+        os.environ['TORCH_HOME'] = folder
+        self.senet = shufflenetv2plus(model_size='Large', return_type='before_pool', device = device)
+        self.num_class = num_class
+        outdim = 512
+        self.senet.conv_last = nn.Sequential( \
+                        nn.Conv2d(672, 512, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                        nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
+                        nn.ReLU(inplace=True))
+        # self.fc = nn.Linear(outdim, num_class)
+
+    def conv_base(self, x):
+        layer = self.senet(x)
+        return layer
+
+    def forward(self, x):
+        layer = self.senet(x)
+        return layer 
 
 ''''
 folder='/Users/dhanley2/Documents/Personal/dfake/weights'
@@ -61,7 +98,8 @@ class ResNet(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
-    
+
+
 class SeNet(nn.Module):
     def __init__(self, layers=18, num_class=2, pretrained=False, folder = None):
         super(SeNet, self).__init__()
@@ -203,7 +241,11 @@ class SPPNet(nn.Module):
         elif  self.arch == 'seresnext':
             self.model = SeNet(folder = folder, num_class=num_class, pretrained=pretrained)
             self.c = 2048
-
+        
+        elif  self.arch == 'shufflenet':
+            self.model = ShuffleNet(folder = folder, num_class=num_class, pretrained=pretrained)
+            print(50*'--')
+        
         self.spp = SpatialPyramidPool2D(out_side=pool_size)
         #num_features = self.c * (pool_size[0] ** 2 + pool_size[1] ** 2 + pool_size[2] ** 2)
         #self.classifier = nn.Linear(num_features, num_class)
@@ -216,6 +258,8 @@ class SPPNet(nn.Module):
         elif self.arch == 'densenet':
             features = self.model.features(x)
             x = F.relu(features, inplace=True)
+        elif self.arch == 'shufflenet':
+            x = self.model(x)
         x = self.spp(x)
         # x = self.classifier(x)
         return x

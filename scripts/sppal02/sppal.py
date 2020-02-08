@@ -312,6 +312,7 @@ class DFakeDataset(Dataset):
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video)
         curr_video_annotation = annodict[vid.video]
+        #logger.info(fname)
         try:
             
             if self.train and (len(curr_video_annotation.keys())>self.maxlen):
@@ -337,14 +338,17 @@ class DFakeDataset(Dataset):
                                                       crop_x=self.shift * self.scale * 2,
                                                       crop_y=self.shift * self.scale * 2)
                     framels.append(im_352)
+            #logger.info('Start augment single')
             augfn = self.snglaug(framels[-1].shape[0]) # snglaugfn() 
             framels = [augfn(image=f)['image'] for f in framels]
             frames = np.stack(framels)
             d0,d1,d2,d3 = frames.shape
             # Standard augmentation on each image
+            #logger.info('Start augment grouped')
             frames = frames.reshape(d0*d1, d2, d3)
             augmented = self.transform(image=frames)['image'] 
             frames = augmented              
+            #logger.info('Start augment norm')
             frames = self.norm(image=frames)['image']
             frames = frames.resize_(d0,d1,d2,d3)
             if self.train:
@@ -385,8 +389,8 @@ valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
+trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=32, collate_fn=collatefn)
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=32, collate_fn=collatefn)
 
 
 logger.info('Create model')
@@ -450,7 +454,7 @@ for epoch in range(EPOCHS):
         scheduler.step()
     else:
         del model
-        model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
+        model = SPPSeqNet(backbone=34, pool_size=poolsize, dense_units = 256, \
                   dropout = 0.2, embed_size = embedsize)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)

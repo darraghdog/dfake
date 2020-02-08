@@ -1,6 +1,4 @@
 import os
-os.environ['KMP_DUPLICATE_LIB_OK']='True'
-
 import sys
 import glob
 import json
@@ -45,7 +43,6 @@ from albumentations import (Cutout, Compose, Normalize, RandomRotate90, Horizont
                            )
 import albumentations as A
 from tqdm import tqdm
-
 from apex import amp
 
 
@@ -80,13 +77,13 @@ parser.add_option('-s', '--border', action="store", dest="border", help="Crop bo
 options, args = parser.parse_args()
 INPATH = options.rootpath
 
-# INPATH='/Users/dhanley2/Documents/Personal/dfake'
+#INPATH='/Users/dhanley2/Documents/Personal/dfake'
 sys.path.append(os.path.join(INPATH, 'utils' ))
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from utils import alignment_v2
 from sort import *
-from sppnet import SPPNet, ShuffleNet
+from sppnet import SPPNet
 from splits import  load_folds, get_real_to_fake_dict_v2, get_cluster_data
 
 # Print info about environments
@@ -160,13 +157,11 @@ logger.info(f'Cropped faces count {len(FRAMELS)}')
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
-    def __init__(self, backbone, architecture, embed_size, pool_size=(1, 2, 6), pretrained=True, \
+    def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
                  dense_units = 256, dropout = 0.2):
         # Only resnet is supported in this version
         super(SPPSeqNet, self).__init__()
-        print(architecture)
-        self.sppnet = SPPNet(backbone=backbone, pool_size=pool_size, folder=WTSPATH, \
-                             architecture=architecture)
+        self.sppnet = SPPNet(backbone=backbone, pool_size=pool_size, folder=WTSPATH)
         self.dense_units = dense_units
         self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
@@ -208,14 +203,14 @@ In this dataset, no video was subjected to more than one augmentation.
 '''
 
 def snglaugfntrn(dim):
-    rot = random.randrange(-10, 10)
+    #rot = random.randrange(-10, 10)
     dim1 = random.uniform(0.7, 1.0)
-    dim2 = random.randrange(int(dim)*0.75, dim)
+    dim2 = random.randrange(int(dim)*0.9, dim)
     return Compose([
         #Resize(SIZE, SIZE, interpolation=3,  p=1),
-        ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
+        #ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
         CenterCrop(int(dim*dim1), int(dim*dim1), always_apply=False, p=0.5), 
-        Resize(dim2, dim2, interpolation=3,  p=0.5),
+        #Resize(dim2, dim2, interpolation=3,  p=0.5),
         Resize(SIZE, SIZE, interpolation=3,  p=1),
         ])
 
@@ -232,44 +227,42 @@ std_img = [0.22613944, 0.1965406 , 0.18660679]
 p1 = 0.1
 trn_transforms = A.Compose([
         A.HorizontalFlip(p=0.5),
-        A.OneOf([
-            A.Downscale(scale_min=0.5, scale_max=0.9, interpolation=0, always_apply=False, p=0.5),
-            ]),
-        A.OneOf([
-            A.GaussNoise(var_limit=(100.0, 600.0), p=p1),
-            A.ISONoise(color_shift=(0.2, 0.25), intensity=(0.2, 0.25), p=p1),
-            A.MultiplicativeNoise(multiplier=[0.7, 1.6], elementwise=False, per_channel=False, p=p1),
-            A.NoOp(p=p1*3),
-            ]),
+        A.Downscale(scale_min=0.8, scale_max=1.0, interpolation=0, always_apply=False, p=0.5),
+        #A.OneOf([
+        #    A.GaussNoise(var_limit=(100.0, 600.0), p=p1),
+        #    A.ISONoise(color_shift=(0.2, 0.25), intensity=(0.2, 0.25), p=p1),
+        #    A.MultiplicativeNoise(multiplier=[0.7, 1.6], elementwise=False, per_channel=False, p=p1),
+        #    A.NoOp(p=p1*3),
+        #    ]),
         A.OneOf([
             A.Blur(blur_limit=15, p=p1),
             A.GaussianBlur(blur_limit=15, p=p1), 
             A.MotionBlur(blur_limit=(15), p=p1), 
             A.MedianBlur(blur_limit=10, p=p1),
-            A.NoOp(p=p1*3),
+            A.NoOp(p=p1*8),
             ]),
+        #A.OneOf([
+        #     A.RandomGamma(gamma_limit=(50, 150), p=p1),
+        #     A.RandomBrightness(limit=0.4, p=p1),
+        #     A.RandomContrast(limit=0.4, p=p1),
+        #     A.NoOp(p=p1*3),
+        #    ]),
         A.OneOf([
-             A.RandomGamma(gamma_limit=(50, 150), p=p1),
-             A.RandomBrightness(limit=0.4, p=p1),
-             A.RandomContrast(limit=0.4, p=p1),
-             A.NoOp(p=p1*3),
+             A.JpegCompression(quality_lower=70, quality_upper=100, always_apply=False, p=p1),
+             A.ImageCompression(quality_lower=70, quality_upper=100, always_apply=False, p=p1),
+             A.NoOp(p=p1*4),
             ]),
-        A.OneOf([
-             A.JpegCompression(quality_lower=30, quality_upper=100, always_apply=False, p=p1),
-             A.ImageCompression(quality_lower=30, quality_upper=100, always_apply=False, p=p1),
-             A.NoOp(p=p1*2),
-            ]),
-        A.OneOf([
-             A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, drop_color=(200, 200, 200), p=p1),
-             A.RandomShadow( p=p1),
-             A.NoOp(p=p1*12),
-            ]),
-        A.OneOf([
-            A.CoarseDropout(max_holes=50, max_height=20, max_width=20, min_height=6, min_width=6, p=p1),
-            A.Cutout(num_holes=12, max_h_size=24, max_w_size=24, fill_value=255, p=p1),
-            A.CLAHE(clip_limit=2.0, p=p1),
-            A.NoOp(p=p1*12),
-            ]),
+        #A.OneOf([
+        #     A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, drop_color=(200, 200, 200), p=p1),
+        #     A.RandomShadow( p=p1),
+        #     A.NoOp(p=p1*12),
+        #    ]),
+        #A.OneOf([
+        #    A.CoarseDropout(max_holes=50, max_height=20, max_width=20, min_height=6, min_width=6, p=p1),
+        #    A.Cutout(num_holes=12, max_h_size=24, max_w_size=24, fill_value=255, p=p1),
+        #    A.CLAHE(clip_limit=2.0, p=p1),
+        #    A.NoOp(p=p1*12),
+        #    ]),
     ])
 
 val_transforms = Compose([
@@ -281,9 +274,10 @@ dir_ = '/Users/dhanley2/Documents/Personal/dfake/data/prepared_data_v4/aligned_f
 
 class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, \
-                 labels = False, maxlen = 32, is_RGB = False, annos=annodict):
+                 labels = False, maxlen = 32, is_RGB = False, annos=annodict, skip = 8):
         self.data = df.copy()
         self.scale = 224 // 112
+        self.skip = skip
         self.shift = BORDER
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
@@ -317,17 +311,20 @@ class DFakeDataset(Dataset):
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video)
         curr_video_annotation = annodict[vid.video]
+        #logger.info(fname)
         try:
             
-            if self.train and (len(curr_video_annotation.keys())>self.maxlen):
-                xtra = len(curr_video_annotation.keys())-self.maxlen # self.maxlen
+            if self.train and (len(curr_video_annotation.keys())>self.maxlen*self.skip):
+                xtra = len(curr_video_annotation.keys())-self.maxlen*self.skip # self.maxlen
             else:
                 # simulate submission - first 32 frames only
                 xtra = 0
             shift = random.randint(0, xtra)
+            #logger.info(f'{xtra} {shift} self.maxlen')
             curr_video_annotation = dict((k,v) for t,(k,v) in \
                                           enumerate(curr_video_annotation.items()) if \
-                                          xtra-shift <= t < xtra-shift+self.maxlen)
+                                          (xtra-shift <= t < xtra-shift+(self.skip*self.maxlen)) & (t%self.skip==0) )
+            #logger.info(curr_video_annotation.keys())
             framels = []
             for key in list(curr_video_annotation.keys()):
                 exp_boxes_squared, new_boxes, new_lmks, final_boxes, final_lmks, final_scores = curr_video_annotation[key]
@@ -343,14 +340,18 @@ class DFakeDataset(Dataset):
                                                       crop_x=self.shift * self.scale * 2,
                                                       crop_y=self.shift * self.scale * 2)
                     framels.append(im_352)
+            #logger.info('Start augment single')
             augfn = self.snglaug(framels[-1].shape[0]) # snglaugfn() 
             framels = [augfn(image=f)['image'] for f in framels]
             frames = np.stack(framels)
+            #logger.info(frames.shape)
             d0,d1,d2,d3 = frames.shape
             # Standard augmentation on each image
+            #logger.info('Start augment grouped')
             frames = frames.reshape(d0*d1, d2, d3)
             augmented = self.transform(image=frames)['image'] 
             frames = augmented              
+            #logger.info('Start augment norm')
             frames = self.norm(image=frames)['image']
             frames = frames.resize_(d0,d1,d2,d3)
             if self.train:
@@ -389,25 +390,19 @@ logger.info('Create loaders...')
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
-trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
-valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
+trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 6)
+valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 6)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=32, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=32, collate_fn=collatefn)
 
+
 logger.info('Create model')
-# WTSPATH=os.path.join(INPATH, 'weights')
 poolsize=(1, 2, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
+# embedsize = 384*sum(i**2 for i in poolsize)
+
 model = SPPSeqNet(backbone=34 , pool_size=poolsize, dense_units = 256, \
-                  dropout = 0.2, embed_size = embedsize, architecture='shufflenet')
-'''
-m = torch.ones(4, 32,224,224, 3)
-model(m)
-dir(model)
-'''
-
-
-#self = model
+                  dropout = 0.2, embed_size = embedsize)
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -462,7 +457,7 @@ for epoch in range(EPOCHS):
         scheduler.step()
     else:
         del model
-        model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
+        model = SPPSeqNet(backbone=34, pool_size=poolsize, dense_units = 256, \
                   dropout = 0.2, embed_size = embedsize)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)

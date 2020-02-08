@@ -141,12 +141,14 @@ metadf.video = metadf.video.str.replace('.mp4', '')
 metadf = foldsdf.merge(metadf, on='video' )
 logger.info('Vladislavs folds {} {}'.format(*metadf.shape))
 
-annos = glob.glob(os.path.join(imgdir,'../annotations'))
+annos = glob.glob(os.path.join(IMGDIR, '../annotations/*'))
+logger.info(annos[:2])
 annos = [loadobj(a) for a in annos]
 annodict = {}
 for d in annos: 
     annodict.update(d)
 annodict = dict((k.split('/')[-1], v) for k,v in annodict.items())
+logger.info(f'Annotation count {len(annodict.keys())}')
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
@@ -325,7 +327,7 @@ class DFakeDataset(Dataset):
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video)
         curr_video_annotation = self.annos[vid.video]
-        
+        logger.info(fname)
         try:
             
             if self.train and (len(vidannos.keys())>self.maxlen):

@@ -1,6 +1,4 @@
 import os
-os.environ['KMP_DUPLICATE_LIB_OK']='True'
-
 import sys
 import glob
 import json
@@ -45,7 +43,6 @@ from albumentations import (Cutout, Compose, Normalize, RandomRotate90, Horizont
                            )
 import albumentations as A
 from tqdm import tqdm
-
 from apex import amp
 
 
@@ -74,19 +71,17 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
-parser.add_option('-s', '--border', action="store", dest="border", help="Crop border", default="0")
 
 
 options, args = parser.parse_args()
 INPATH = options.rootpath
 
-# INPATH='/Users/dhanley2/Documents/Personal/dfake'
+#INPATH='/Users/dhanley2/Documents/Personal/dfake'
 sys.path.append(os.path.join(INPATH, 'utils' ))
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
-from utils import alignment_v2
 from sort import *
-from sppnet import SPPNet, ShuffleNet
+from sppnet import SPPNet
 from splits import  load_folds, get_real_to_fake_dict_v2, get_cluster_data
 
 # Print info about environments
@@ -111,7 +106,6 @@ WTSFILES = os.path.join(INPATH, options.wtspath)
 WTSPATH = os.path.join(INPATH, options.wtspath)
 IMGDIR = os.path.join(INPATH, options.imgpath)
 EPOCHS = int(options.epochs)
-BORDER=int(options.border)
 START = int(options.start)
 LR=float(options.lr)
 LRGAMMA=float(options.lrgamma)
@@ -146,27 +140,14 @@ metadf.video = metadf.video.str.replace('.mp4', '')
 metadf = foldsdf.merge(metadf, on='video' )
 logger.info('Vladislavs folds {} {}'.format(*metadf.shape))
 
-annos = glob.glob(os.path.join(IMGDIR, '../annotations/*'))
-logger.info(annos[:2])
-annos = [loadobj(a) for a in annos]
-annodict = {}
-for d in annos: 
-    annodict.update(d)
-annodict = dict((k.split('/')[-1], v) for k,v in annodict.items())
-logger.info(f'Annotation count {len(annodict.keys())}')
-
-FRAMELS = pd.read_csv(os.path.join(IMGDIR, '../cropped_faces.txt'), header=None).iloc[:,0].tolist() # [i[0].split('/')[-1] for i in os.walk(IMGDIR)]
-logger.info(f'Cropped faces count {len(FRAMELS)}')
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
-    def __init__(self, backbone, architecture, embed_size, pool_size=(1, 2, 6), pretrained=True, \
+    def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
                  dense_units = 256, dropout = 0.2):
         # Only resnet is supported in this version
         super(SPPSeqNet, self).__init__()
-        print(architecture)
-        self.sppnet = SPPNet(backbone=backbone, pool_size=pool_size, folder=WTSPATH, \
-                             architecture=architecture)
+        self.sppnet = SPPNet(backbone=backbone, pool_size=pool_size, folder=WTSPATH)
         self.dense_units = dense_units
         self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
@@ -207,21 +188,19 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def snglaugfntrn(dim):
+def snglaugfntrn():
     rot = random.randrange(-10, 10)
     dim1 = random.uniform(0.7, 1.0)
-    dim2 = random.randrange(int(dim)*0.75, dim)
+    dim2 = random.randrange(int(SIZE)*0.75, SIZE)
     return Compose([
-        #Resize(SIZE, SIZE, interpolation=3,  p=1),
+        Resize(SIZE, SIZE, interpolation=3,  p=1),
         ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
-        CenterCrop(int(dim*dim1), int(dim*dim1), always_apply=False, p=0.5), 
+        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
         Resize(dim2, dim2, interpolation=3,  p=0.5),
         Resize(SIZE, SIZE, interpolation=3,  p=1),
         ])
 
-logger.info(snglaugfntrn(352))
-
-def snglaugfnval(dim):
+def snglaugfnval():
     return Compose([
         Resize(SIZE, SIZE, interpolation=3,  p=1),
         ])
@@ -276,23 +255,37 @@ val_transforms = Compose([
     NoOp(),
     #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
+'''
+transform_norm = Compose([
+    #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
+    Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
+    ToTensor()
+    ])
+'''
     
 dir_ = '/Users/dhanley2/Documents/Personal/dfake/data/prepared_data_v4/aligned_faces'
 
+'''
+ONDISK = [i[0].split('/')[-1] for i in os.walk(dir_)]
+logger.info(f'Length on disk {len(ONDISK)}')
+metadf[metadf.video.isin(ONDISK)]
+'''
 class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, \
-                 labels = False, maxlen = 32, is_RGB = False, annos=annodict):
+                 labels = False, maxlen = 32, is_RGB = False):
         self.data = df.copy()
-        self.scale = 224 // 112
-        self.shift = BORDER
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = FRAMELS.copy()  # [i[0].split('/')[-1] for i in os.walk(self.imgdir)]
+        # self.framels = os.listdir(imgdir)
+        # '/Users/dhanley2/Documents/Personal/dfake/data/prepared_data_v4/aligned_faces'
+        self.framels = [i[0].split('/')[-1] for i in os.walk(self.imgdir)]
         self.labels = labels
+        #self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = self.data[self.data.video.isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
                                [self.data.query('label == 1')])
         self.data = self.data.sample(frac=1).reset_index(drop=True)
+        # self.data = pd.concat([ self.data[self.data.video.str.contains('qirlrtrxba')],  self.data[:500].copy() ]).reset_index(drop=True)
         self.maxlen = maxlen
         logger.info('Expand the REAL class {} {}'.format(*self.data.shape))
         self.snglaug = snglaugfntrn if not val else snglaugfnval
@@ -304,9 +297,15 @@ class DFakeDataset(Dataset):
         else:
             self.means = [0.485, 0.456, 0.406][::-1]
             self.stds = [0.229, 0.224, 0.225][::-1]
+        #'''
         self.norm = Compose([
                 Normalize(mean=self.means, std=self.stds, max_pixel_value=255.0, p=1.0),
                 ToTensor()])
+        #'''
+        #self.norm =  Compose(
+        #    [ToTensor(),
+        #     Normalize(mean=self.means, std=self.stds)])
+
         self.transform = trn_transforms if not val else val_transforms
 
     def __len__(self):
@@ -316,36 +315,22 @@ class DFakeDataset(Dataset):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video)
-        curr_video_annotation = annodict[vid.video]
         try:
-            
-            if self.train and (len(curr_video_annotation.keys())>self.maxlen):
-                xtra = len(curr_video_annotation.keys())-self.maxlen # self.maxlen
+            #frames = np.load(fname)['arr_0']
+            # fname=INPATH+'/data/prepared_data_v4/aligned_faces/zplyjqnfmv'
+            jpgls = os.listdir(fname)
+            jpgls = [x for _,x in sorted(zip(map(lambda x: int(x.split('_')[0]), jpgls), jpgls))]
+            # Cut the frames to max 37 with a sliding window
+            if self.train and (len(jpgls)>self.maxlen):
+                xtra = len(jpgls)-self.maxlen # self.maxlen
+                shift = random.randint(0, xtra)
+                frames = jpgls[xtra-shift:xtra-shift+self.maxlen]
             else:
                 # simulate submission - first 32 frames only
-                xtra = 0
-            shift = random.randint(0, xtra)
-            curr_video_annotation = dict((k,v) for t,(k,v) in \
-                                          enumerate(curr_video_annotation.items()) if \
-                                          xtra-shift <= t < xtra-shift+self.maxlen)
-            framels = []
-            for key in list(curr_video_annotation.keys()):
-                exp_boxes_squared, new_boxes, new_lmks, final_boxes, final_lmks, final_scores = curr_video_annotation[key]
-                for face_idx, (box, lmks) in enumerate(zip(new_boxes, new_lmks)):
-                    im_source = cv2.imread(f'{self.imgdir}/{vid.video}/{key}_{face_idx}.jpg')
-                    #logger.info(im_source)
-                    im_352 = alignment_v2(im_source,
-                                                      lmks,
-                                                      ncols=self.scale * 112,
-                                                      nrows=self.scale * 112,
-                                                      plus_x=self.shift,
-                                                      plus_y=self.shift,
-                                                      crop_x=self.shift * self.scale * 2,
-                                                      crop_y=self.shift * self.scale * 2)
-                    framels.append(im_352)
-            augfn = self.snglaug(framels[-1].shape[0]) # snglaugfn() 
-            framels = [augfn(image=f)['image'] for f in framels]
-            frames = np.stack(framels)
+                frames = jpgls[:self.maxlen]
+            augfn = self.snglaug() # snglaugfntrn() 
+            frames = [cv2.imread(os.path.join(fname, f)) for f in frames]
+            frames = np.stack([augfn(image=f.copy())['image'] for f in frames])
             d0,d1,d2,d3 = frames.shape
             # Standard augmentation on each image
             frames = frames.reshape(d0*d1, d2, d3)
@@ -391,23 +376,17 @@ valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=32, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=32, collate_fn=collatefn)
+trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
+
 
 logger.info('Create model')
-# WTSPATH=os.path.join(INPATH, 'weights')
 poolsize=(1, 2, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
-model = SPPSeqNet(backbone=34 , pool_size=poolsize, dense_units = 256, \
-                  dropout = 0.2, embed_size = embedsize, architecture='shufflenet')
-'''
-m = torch.ones(4, 32,224,224, 3)
-model(m)
-dir(model)
-'''
+# embedsize = 384*sum(i**2 for i in poolsize)
 
-
-#self = model
+model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
+                  dropout = 0.2, embed_size = embedsize)
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']

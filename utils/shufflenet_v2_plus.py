@@ -5,7 +5,6 @@ import torch.nn as nn
 from shufflenet import Shufflenet, Shuffle_Xception, HS, SELayer
 
 
-
 class ShuffleNetV2_Plus(nn.Module):
     def __init__(
         self,
@@ -132,8 +131,8 @@ class ShuffleNetV2_Plus(nn.Module):
             curr_dir = os.path.dirname(__file__)
             weights_path = f'{curr_dir}/../weights/shufflenet/ShuffleNetV2+.{model_size}.pth.tar'
             print('load pretrained weights from', weights_path)
-            state_dict = torch.load(weights_path)
-            self.load_state_dict(state_dict, strict=False, map_location=device)
+            state_dict = torch.load(weights_path, map_location=device)
+            self.load_state_dict(state_dict, strict=False)
 
     def forward(self, x):
         x = self.first_conv(x)

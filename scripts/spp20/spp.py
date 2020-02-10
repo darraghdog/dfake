@@ -167,16 +167,22 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def snglaugfn():
+def snglaugfn(imgdim):
     rot = random.randrange(-10, 10)
-    dim1 = random.uniform(0.7, 1.0)
-    dim2 = random.randrange(int(SIZE)*0.75, SIZE)
+    dim1 = random.uniform(0.5, 1.0)
+    dim2 = random.randrange(int(imgdim*0.75), imgdim)
     return Compose([
         ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
-        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
+        CenterCrop(int(imgdim*dim1), int(imgdim*dim1), always_apply=False, p=0.8), 
         Resize(dim2, dim2, interpolation=1,  p=0.5),
         Resize(SIZE, SIZE, interpolation=1,  p=1),
         ])
+
+val_transforms = Compose([
+    NoOp(),
+    Resize(SIZE, SIZE, interpolation=1,  p=1), 
+    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
+    ])
 
 mean_img = [0.4258249 , 0.31385377, 0.29170314]
 std_img = [0.22613944, 0.1965406 , 0.18660679]
@@ -224,10 +230,6 @@ trn_transforms = A.Compose([
             ]),
     ])
 
-val_transforms = Compose([
-    NoOp(),
-    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
-    ])
 
 transform_norm = Compose([
     #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
@@ -275,8 +277,9 @@ class DFakeDataset(Dataset):
             d0,d1,d2,d3 = frames.shape
             augsngl = self.snglaug
             # Standard augmentation on each image
-            augfn = self.snglaug()
+            augfn = self.snglaug(d2)
             if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
+            d0,d1,d2,d3 = frames.shape
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:
                 augmented = self.transform(image=frames)

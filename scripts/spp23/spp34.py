@@ -70,6 +70,8 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
+parser.add_option('-s', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
+
 
 
 options, args = parser.parse_args()
@@ -81,9 +83,6 @@ from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from sort import *
 from sppnet import SPPNet
-from splits import  load_folds, get_real_to_fake_dict_v2, get_cluster_data
-from utils import alignment_v2
-
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -99,9 +98,10 @@ for (k,v) in options.__dict__.items():
     logger.info('{}{}'.format(k.ljust(20), v))
 
 SEED = int(options.seed)
+SKIP = int(options.skip)
 SIZE = int(options.size)
 FOLD = int(options.fold)
-BATCHSIZE = int(options.batchsize)
+BATCHSIZE = int(options.batchsize) * SKIP
 METAFILE = os.path.join(INPATH, 'data', options.metafile)
 WTSFILES = os.path.join(INPATH, options.wtspath)
 WTSPATH = os.path.join(INPATH, options.wtspath)
@@ -117,39 +117,6 @@ ACCUM=int(options.accum)
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
-
-METADATA_PATH=os.path.join(INPATH, 'data/splits')
-real_set, fake_set, real_to_fake = get_real_to_fake_dict_v2(METADATA_PATH)
-REAL_VIDEO_TO_CLUSTER, FAKE_VIDEO_TO_CLUSTER, CLUSTER_TO_REAL_VIDEOS, \
-            CLUSTER_TO_FAKE_VIDEOS, CLUSTER_TO_DESCRIPTOR = \
-            get_cluster_data(METADATA_PATH)
-video_to_cluster = {}
-video_to_cluster.update(REAL_VIDEO_TO_CLUSTER)
-video_to_cluster.update(FAKE_VIDEO_TO_CLUSTER)
-folds_data = load_folds(METADATA_PATH)
-
-logger.info('Join Vladislavs folds ')
-foldsdf = pd.DataFrame(sum([[[i,k] for k in j] for i,j in folds_data.items()], []), columns = ['fold', 'cluster'])
-vidclust = pd.DataFrame(pd.Series(video_to_cluster, name = 'cluster'))
-foldsdf = pd.merge(foldsdf, vidclust.reset_index(), on='cluster')
-foldsdf = foldsdf.rename(columns={'index': 'video'})
-foldsdf.shape
-metadf = metadf.drop(['fold', 'cluster'], 1)
-metadf.video = metadf.video.str.replace('.mp4', '')
-metadf = foldsdf.merge(metadf, on='video' )
-logger.info('Vladislavs folds {} {}'.format(*metadf.shape))
-
-annos = glob.glob(os.path.join(IMGDIR, '../annotations/*'))
-logger.info(annos[:2])
-annos = [loadobj(a) for a in annos]
-annodict = {}
-for d in annos: 
-    annodict.update(d)
-annodict = dict((k.split('/')[-1], v) for k,v in annodict.items())
-logger.info(f'Annotation count {len(annodict.keys())}')
-
-FRAMELS = pd.read_csv(os.path.join(IMGDIR, '../cropped_faces.txt'), header=None).iloc[:,0].tolist() # [i[0].split('/')[-1] for i in os.walk(IMGDIR)]
-logger.info(f'Cropped faces count {len(FRAMELS)}')
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
@@ -267,13 +234,11 @@ transform_norm = Compose([
     ])
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
+    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32//SKIP):
         self.data = df.copy()
-        self.scale = 224 // 112
-        self.shift = 0
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = FRAMELS # os.listdir(imgdir)
+        self.framels = os.listdir(imgdir)
         self.labels = labels
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
@@ -294,37 +259,15 @@ class DFakeDataset(Dataset):
     def __getitem__(self, idx):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
-        #fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
-        fname = os.path.join(self.imgdir, vid.video)
-        curr_video_annotation = annodict[vid.video]
+        fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
-            if self.train and (len(curr_video_annotation.keys())>self.maxlen):
-                xtra = len(curr_video_annotation.keys())-self.maxlen # self.maxlen
-            else:
-                # simulate submission - first 32 frames only
-                xtra = 0
-            shift = random.randint(0, xtra)
-            curr_video_annotation = dict((k,v) for t,(k,v) in \
-                                          enumerate(curr_video_annotation.items()) if \
-                                          xtra-shift <= t < xtra-shift+self.maxlen)
-            framels = []
-            for key in list(curr_video_annotation.keys()):
-                exp_boxes_squared, new_boxes, new_lmks, final_boxes, final_lmks, final_scores = curr_video_annotation[key]
-                for face_idx, (box, lmks) in enumerate(zip(new_boxes, new_lmks)):
-                    im_source = cv2.imread(f'{self.imgdir}/{vid.video}/{key}_{face_idx}.jpg')
-                    #logger.info(im_source)
-                    im_352 = alignment_v2(im_source,
-                                                      lmks,
-                                                      ncols=self.scale * 112,
-                                                      nrows=self.scale * 112,
-                                                      plus_x=self.shift,
-                                                      plus_y=self.shift,
-                                                      crop_x=self.shift * self.scale * 2,
-                                                      crop_y=self.shift * self.scale * 2)
-                    framels.append(im_352[:,:,::-1])
-            frames = np.stack(framels)
-            '''
             frames = np.load(fname)['arr_0']
+            shp1 = frames.shape
+            if (SKIP>1) and (frames.shape[0] > SKIP*6):
+                every_k = random.randint(0,SKIP-1)
+                frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
+            shp2 = frames.shape
+            # logger.info(f'{shp1} {shp2}')
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
@@ -333,7 +276,6 @@ class DFakeDataset(Dataset):
                 frames = frames[xtra-shift:xtra-shift+self.maxlen]
             else:
                 frames = frames[:self.maxlen]
-            '''
             d0,d1,d2,d3 = frames.shape
             augsngl = self.snglaug
             # Standard augmentation on each image
@@ -382,14 +324,14 @@ logger.info('Create loaders...')
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
-trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32)
-valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=32, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE, shuffle=False, num_workers=32, collate_fn=collatefn)
+trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 48//SKIP)
+valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 48//SKIP)
+trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
 
 logger.info('Create model')
-poolsize=(1, 2, 6)
+poolsize=(1, 2)
 embedsize = 512*sum(i**2 for i in poolsize)
 # embedsize = 384*sum(i**2 for i in poolsize)
 
@@ -487,3 +429,4 @@ for epoch in range(EPOCHS):
         yvaldf.to_csv('preds/dfake_sppnet34_sub_epoch{}.csv.gz'.format(epoch), \
             index = False, compression = 'gzip')
         del yactval, ypredval, valids
+

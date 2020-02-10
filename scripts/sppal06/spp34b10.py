@@ -198,14 +198,19 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def snglaugfn():
+def snglaugfn(dim):
     rot = random.randrange(-10, 10)
     dim1 = random.uniform(0.7, 1.0)
-    dim2 = random.randrange(int(SIZE)*0.75, SIZE)
+    dim2 = random.randrange(int(dim)*0.75, dim)
     return Compose([
         ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
-        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
+        CenterCrop(int(dim*dim1), int(dim*dim1), always_apply=False, p=0.5), 
         Resize(dim2, dim2, interpolation=1,  p=0.5),
+        Resize(SIZE, SIZE, interpolation=1,  p=1),
+        ])
+
+def snglaugfnval(dim):
+    return Compose([
         Resize(SIZE, SIZE, interpolation=1,  p=1),
         ])
 
@@ -270,7 +275,7 @@ class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
         self.data = df.copy()
         self.scale = 224 // 112
-        self.shift = 0
+        self.shift = 10
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
         self.framels = FRAMELS # os.listdir(imgdir)
@@ -282,7 +287,7 @@ class DFakeDataset(Dataset):
         # self.data = pd.concat([ self.data[self.data.video.str.contains('qirlrtrxba')],  self.data[:500].copy() ]).reset_index(drop=True)
         self.maxlen = maxlen
         logger.info('Expand the REAL class {} {}'.format(*self.data.shape))
-        self.snglaug = snglaugfn
+        self.snglaug = snglaugfn if not val else snglaugfnval
         self.train = train
         self.val = val
         self.norm = transform_norm
@@ -335,10 +340,10 @@ class DFakeDataset(Dataset):
                 frames = frames[:self.maxlen]
             '''
             d0,d1,d2,d3 = frames.shape
-            augsngl = self.snglaug
             # Standard augmentation on each image
-            augfn = self.snglaug()
-            if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
+            augfn = self.snglaug(d1)
+            frames = np.stack([augfn(image=f)['image'] for f in frames])
+            d0,d1,d2,d3 = frames.shape
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:
                 augmented = self.transform(image=frames)
@@ -414,7 +419,7 @@ for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
-    model_file_name = 'weights/sppnet34_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+    model_file_name = 'weights/sppnet34_b10_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)

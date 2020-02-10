@@ -262,6 +262,12 @@ class DFakeDataset(Dataset):
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
             frames = np.load(fname)['arr_0']
+            shp1 = frames.shape
+            if (SKIP>1) and (frames.shape[0] > SKIP*6):
+                every_k = random.randint(0,SKIP-1)
+                frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
+            shp2 = frames.shape
+            # logger.info(f'{shp1} {shp2}')
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
@@ -318,8 +324,8 @@ logger.info('Create loaders...')
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
-trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 32//SKIP)
-valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 32//SKIP)
+trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 48//SKIP)
+valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 48//SKIP)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
@@ -423,3 +429,4 @@ for epoch in range(EPOCHS):
         yvaldf.to_csv('preds/dfake_sppnet34_sub_epoch{}.csv.gz'.format(epoch), \
             index = False, compression = 'gzip')
         del yactval, ypredval, valids
+

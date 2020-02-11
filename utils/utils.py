@@ -977,3 +977,15 @@ def get_similarity_transform_for_cv2(src_pts, dst_pts, reflective=True):
     return cv2_trans
 
 
+def get_per_class_loss(labels, predicts, clip_low=0, clip_high=1):
+    clipped_predicts = np.clip(predicts, clip_low, clip_high)
+    real_class_loss = -np.log(1 - clipped_predicts[labels == 0]).sum()
+    real_mean_loss = real_class_loss / sum(labels == 0)
+
+    fake_class_loss = -np.log(clipped_predicts[labels == 1]).sum()
+    fake_mean_loss = fake_class_loss / sum(labels == 1)
+
+    logloss = (real_class_loss + fake_class_loss) / len(labels)
+
+    return real_mean_loss, fake_mean_loss, logloss
+

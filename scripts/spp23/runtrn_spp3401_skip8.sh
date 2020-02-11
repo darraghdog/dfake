@@ -1,5 +1,5 @@
 N_GPU=1
-WDIR='spp25'
+WDIR='spp23'
 FOLD=0
 SIZE='224'
 ACCUM=1
@@ -10,5 +10,5 @@ do
             -m dbslp1828 -n 1 -R "span[ptile=4]" -o log_train_%J  sh -c "cd /share/dhanley2/dfake/scripts/$WDIR  && python3 spp34.py  \
             --wtspath weights  --fold $FOLD  --rootpath /share/dhanley2/dfake/ --metafile trainmeta.csv.gz  \
             --accum $ACCUM --imgpath data/mount/npimg08 --size $SIZE --batchsize 8 --lr $LR \
-            --start 0 --epochs 20 --skip 4"
+            --start 0 --epochs 20 --skip 8"
 done

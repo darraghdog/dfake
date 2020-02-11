@@ -140,11 +140,12 @@ metadf = foldsdf.merge(metadf, on='video' )
 logger.info('Vladislavs folds {} {}'.format(*metadf.shape))
 
 annos = glob.glob(os.path.join(IMGDIR, '../annotations/*'))
-logger.info(annos[:2])
-annos = [loadobj(a) for a in annos]
 annodict = {}
-for d in annos: 
-    annodict.update(d)
+for a in annos: 
+    if 'pickle' not in a:
+        continue
+    logger.info(a)
+    annodict.update(loadobj(a))
 annodict = dict((k.split('/')[-1], v) for k,v in annodict.items())
 logger.info(f'Annotation count {len(annodict.keys())}')
 

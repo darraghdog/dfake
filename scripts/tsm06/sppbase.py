@@ -231,7 +231,7 @@ class DFakeDataset(Dataset):
                 every_k = random.randint(0,SKIP-1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
             if (SKIP>1) and (frames.shape[0] > SKIP*2):
-                every_k = random.randint(0,SKIP//2-1)
+                every_k = random.randint(0, (SKIP//2) -1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%(SKIP//2)==every_k])
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
@@ -268,12 +268,11 @@ def collatefn(batch):
     ids = torch.tensor([l['idx'] for l in batch])
 
     maxlen = seqlen.max()    
-    maxlen=32
     # get shapes
     d0,d1,d2,d3 = batch[0]['frames'].shape
         
     # Pad with zero frames
-    x_batch = [l['frames'][:32] if l['frames'].shape[0] >= maxlen else \
+    x_batch = [l['frames'][:(MAXLEN // SKIP)] if l['frames'].shape[0] >= (MAXLEN // SKIP) else \
          torch.cat((l['frames'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
          for l,sl in zip(batch, seqlen)]
     x_batch = torch.cat([x.unsqueeze(0) for x in x_batch])

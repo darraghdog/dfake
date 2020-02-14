@@ -73,6 +73,7 @@ parser.add_option('-q', '--infer', action="store", dest="infer", help="root dire
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
 parser.add_option('-s', '--maxlen', action="store", dest="maxlen", help="Cap all frames sequences here", default="40")
 parser.add_option('-t', '--nsegment', action="store", dest="nsegment", help="TSM sequence length", default="8")
+parser.add_option('-u', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
 
 
 options, args = parser.parse_args()
@@ -101,8 +102,9 @@ for (k,v) in options.__dict__.items():
 
 SEED = int(options.seed)
 SIZE = int(options.size)
+SKIP = int(options.skip)
 FOLD = int(options.fold)
-BATCHSIZE = int(options.batchsize)
+BATCHSIZE = int(options.batchsize) * SKIP
 METAFILE = os.path.join(INPATH, 'data', options.metafile)
 WTSFILES = os.path.join(INPATH, options.wtspath)
 WTSPATH = os.path.join(INPATH, options.wtspath)
@@ -241,7 +243,7 @@ transform_norm = Compose([
     ])
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32):
+    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP ):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
@@ -269,7 +271,13 @@ class DFakeDataset(Dataset):
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
             frames = np.load(fname)['arr_0']
-            # Cut the frames to max 37 with a sliding window
+            # Skip & cut the frames to maxlen
+            if (SKIP>1) and (frames.shape[0] > SKIP*4):
+                every_k = random.randint(0,SKIP-1)
+                frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
+            if (SKIP>1) and (frames.shape[0] > SKIP*2):
+                every_k = random.randint(0,SKIP//2-1)
+                frames = np.stack([b for t,b in enumerate(frames) if t%(SKIP//2)==every_k])
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
                 xtra = frames.shape[0]-self.maxlen
@@ -289,6 +297,7 @@ class DFakeDataset(Dataset):
             augmented = self.norm(image=frames)
             frames = augmented['image']
             frames = frames.resize_(d0,d1,d2,d3)
+            # logger.info(frames.shape)
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    
@@ -305,7 +314,7 @@ def collatefn(batch):
 
     maxlen = seqlen.max()    
     # Get the seq len in segment intervals
-    padlen = min(32, math.ceil(seqlen.max()/NSEGMENT) * NSEGMENT)
+    padlen = min(NSEGMENT, math.ceil(seqlen.max()/NSEGMENT) * NSEGMENT)
 
     # get shapes
     d0,d1,d2,d3 = batch[0]['frames'].shape
@@ -328,8 +337,8 @@ logger.info('Create loaders...')
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
-trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = MAXLEN)
-valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = MAXLEN)
+trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = MAXLEN // SKIP)
+valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = MAXLEN // SKIP)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
@@ -398,6 +407,7 @@ for epoch in range(EPOCHS):
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
             y = batch['labels'].to(device, dtype=torch.float)
+            # logger.info(x.shape)
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)
@@ -451,5 +461,4 @@ for epoch in range(EPOCHS):
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
         del yactval, ypredval, valids
-
 

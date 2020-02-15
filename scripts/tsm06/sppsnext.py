@@ -70,8 +70,9 @@ parser.add_option('-o', '--lrgamma', action="store", dest="lrgamma", help="Sched
 parser.add_option('-p', '--start', action="store", dest="start", help="Start epochs", default="0")
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
-parser.add_option('-s', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
-
+parser.add_option('-s', '--maxlen', action="store", dest="maxlen", help="Cap all frames sequences here", default="40")
+parser.add_option('-t', '--nsegment', action="store", dest="nsegment", help="TSM sequence length", default="8")
+parser.add_option('-u', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
 
 options, args = parser.parse_args()
 INPATH = options.rootpath
@@ -96,9 +97,9 @@ logger.info('Load params')
 for (k,v) in options.__dict__.items():
     logger.info('{}{}'.format(k.ljust(20), v))
 
-SKIP = int(options.skip)
 SEED = int(options.seed)
 SIZE = int(options.size)
+SKIP = int(options.skip)
 FOLD = int(options.fold)
 BATCHSIZE = int(options.batchsize) * SKIP
 METAFILE = os.path.join(INPATH, 'data', options.metafile)
@@ -112,51 +113,12 @@ LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
+MAXLEN = int(options.maxlen)
+NSEGMENT = int(options.nsegment)
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
-
-
-n_gpu = torch.cuda.device_count()
-logger.info('Cuda n_gpus : {}'.format(n_gpu ))
-
-# https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
-class SPPSeqNet(nn.Module):
-    def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
-                 architecture = 'resnet', dense_units = 256, dropout = 0.2):
-        # Only resnet is supported in this version
-        super(SPPSeqNet, self).__init__()
-        logger.info('{} {} {}'.format(architecture, backbone, WTSPATH))
-        self.sppnet = SPPNet(architecture=architecture, backbone=backbone, pool_size=pool_size, folder=WTSPATH)
-        self.dense_units = dense_units
-        self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
-        self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
-        self.linear_out = nn.Linear(self.dense_units*2, 1)
-        self.embedding_dropout = SpatialDropout(dropout)
-    
-    def forward(self, x):
-        # Input is batch of image sequences
-        batch_size, seqlen = x.size()[:2]
-        # Flatten to make a single long list of frames
-        x = x.view(batch_size * seqlen, *x.size()[2:])
-        # Pass each frame thru SPPNet
-        emb = self.sppnet(x.permute(0,3,1,2))
-        # Split back out to batch
-        emb = emb.view(batch_size, seqlen, emb.size()[1])
-        emb = self.embedding_dropout(emb)
-        
-        # Pass batch thru sequential model(s)
-        h_lstm1, _ = self.lstm1(emb)
-        max_pool, _ = torch.max(h_lstm1, 1)
-        h_pool_linear = F.relu(self.linear1(max_pool))
-        
-        # Max pool and linear layer
-        hidden = max_pool + h_pool_linear
-        
-        # Classifier
-        out = self.linear_out(hidden)
-        return out
 
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
 # https://www.kaggle.com/alexanderliao/image-augmentation-demo-with-albumentation/notebook
@@ -228,17 +190,15 @@ trn_transforms = A.Compose([
 
 val_transforms = Compose([
     NoOp(),
-    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
 
 transform_norm = Compose([
-    #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
     ToTensor()
     ])
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP):
+    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP ):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
@@ -266,13 +226,13 @@ class DFakeDataset(Dataset):
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
             frames = np.load(fname)['arr_0']
-            # shp1 = frames.shape
-            if (SKIP>1) and (frames.shape[0] > SKIP*6):
+            # Skip & cut the frames to maxlen
+            if (SKIP>1) and (frames.shape[0] > SKIP*4):
                 every_k = random.randint(0,SKIP-1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
-            # shp2 = frames.shape
-            # logger.info(f'{shp1} {shp2}')
-            # Cut the frames to max 37 with a sliding window
+            if (SKIP>1) and (frames.shape[0] > SKIP*2):
+                every_k = random.randint(0, (SKIP//2) -1)
+                frames = np.stack([b for t,b in enumerate(frames) if t%(SKIP//2)==every_k])
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
                 xtra = frames.shape[0]-self.maxlen
@@ -292,6 +252,7 @@ class DFakeDataset(Dataset):
             augmented = self.norm(image=frames)
             frames = augmented['image']
             frames = frames.resize_(d0,d1,d2,d3)
+            # logger.info(frames.shape)
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    
@@ -305,13 +266,12 @@ def collatefn(batch):
     batch = [b for b in batch if b is not None]
     seqlen = torch.tensor([l['frames'].shape[0] for l in batch])
     ids = torch.tensor([l['idx'] for l in batch])
-
-    maxlen = seqlen.max()    
+    maxlen = MAXLEN // SKIP
     # get shapes
     d0,d1,d2,d3 = batch[0]['frames'].shape
         
     # Pad with zero frames
-    x_batch = [l['frames'] if l['frames'].shape[0] == maxlen else \
+    x_batch = [l['frames'][: maxlen ] if l['frames'].shape[0] >= ( maxlen ) else \
          torch.cat((l['frames'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
          for l,sl in zip(batch, seqlen)]
     x_batch = torch.cat([x.unsqueeze(0) for x in x_batch])
@@ -323,23 +283,29 @@ def collatefn(batch):
         return {'frames': x_batch, 'ids': ids, 'seqlen': seqlen}
     
 logger.info('Create loaders...')
-# IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
-# BATCHSIZE=2
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
-trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 48 // SKIP)
-valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 48 // SKIP)
+trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = MAXLEN // SKIP)
+valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = MAXLEN // SKIP)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
 logger.info('Create model')
-poolsize=(1, 2) # , 6)
+poolsize=(1, 2, 6) #, 6)
 embedsize = 512*sum(i**2 for i in poolsize)
-# embedsize = 384*sum(i**2 for i in poolsize)
-
+'''
 model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  architecture = 'seresnext', dropout = 0.2, embed_size = embedsize)
+                  dropout = 0.2, embed_size = embedsize)
+NSEGMENT=16
+'''
+os.environ['TORCH_MODEL_ZOO'] = os.path.join(INPATH, 'weights')
+from tsm import TSN
+model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.5, \
+            base_model='se_resnext50_32x4d', img_feature_dim=224, pretrain='imagenet', \
+            temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
+            partial_bn=False, consensus_type='avg', custom_weights = True)
+
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -348,29 +314,20 @@ plist = [
     {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 optimizer = optim.Adam(plist, lr=LR)
-# scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
 
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
-
-if n_gpu > 0:
-    model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
 
 ypredvalls = []
 for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
-    model_file_name = 'weights/sppnet_seresnext_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+    model_file_name = 'weights/tsmsnext_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
-        if epoch == (START - 1):
-            model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  architecture = 'seresnext', dropout = 0.2, embed_size = embedsize)
-            if n_gpu > 0:
-                model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
-            model.load_state_dict(torch.load(model_file_name))
-            model.to(device)
+        model.load_state_dict(torch.load(model_file_name))
+        model.to(device)
         scheduler.step()
         continue
     if INFER not in ['TST', 'EMB', 'VAL']:
@@ -381,6 +338,10 @@ for epoch in range(EPOCHS):
         model.train()  
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
+            x = x.permute(0, 1, 4, 2, 3)
+            # logger.info(50*'--')
+            # logger.info(x.shape)
+            # logger.info(50*'--')
             y = batch['labels'].to(device, dtype=torch.float)
             x = torch.autograd.Variable(x, requires_grad=True)
             y = torch.autograd.Variable(y)
@@ -401,10 +362,6 @@ for epoch in range(EPOCHS):
         torch.save(model.state_dict(), model_file_name)
         scheduler.step()
     else:
-        model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  architecture = 'seresnext', dropout = 0.2, embed_size = embedsize)
-        if n_gpu > 0:
-            model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
     if INFER in ['VAL', 'TRN']:
@@ -414,6 +371,7 @@ for epoch in range(EPOCHS):
         with torch.no_grad():
             for step, batch in enumerate(valloader):
                 x = batch['frames'].to(device, dtype=torch.float)
+                x = x.permute(0, 1, 4, 2, 3)
                 out = model(x)
                 out = torch.sigmoid(out)
                 ypredval.append(out.cpu().detach().numpy())
@@ -427,17 +385,12 @@ for epoch in range(EPOCHS):
         logger.info('Actuals {}'.format(yactval[:8]))
         logger.info('Preds {}'.format(ypredval[:8]))
         logger.info('Ids {}'.format(valids[:8]))
-        for c in [.1, .07, .05, .03, .01, .001] :
+        for c in [.1, .01, .001] :
             valloss = log_loss(yactval, ypredval.clip(c,1-c))
             logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
-        for c in [.1, .07, .05, .03, .01, .001] :
+        for c in [.1, .01, .001] :
             BAGS=3
             ypredvalbag = sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
-        logger.info('Write out bagged prediction to preds folder')
-        yvaldf = valdataset.data.iloc[valids][['video', 'label']]
-        yvaldf['pred'] = ypredval 
-        yvaldf.to_csv('preds/dfake_sppnet_sub_epoch{}_fold{}.csv.gz'.format(epoch, FOLD), \
-            index = False, compression = 'gzip')
         del yactval, ypredval, valids

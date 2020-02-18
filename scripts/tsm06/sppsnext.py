@@ -326,6 +326,10 @@ for epoch in range(EPOCHS):
     logger.info('-' * 10)
     model_file_name = 'weights/tsmsnext_cos_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
     if epoch<START:
+        model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.5, \
+            base_model='se_resnext50_32x4d', img_feature_dim=224, pretrain='imagenet', \
+            temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
+            partial_bn=False, consensus_type='avg', custom_weights = True)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
         scheduler.step()
@@ -362,6 +366,10 @@ for epoch in range(EPOCHS):
         torch.save(model.state_dict(), model_file_name)
         scheduler.step()
     else:
+        model = TSN(num_class=1, num_segments=NSEGMENT, modality='RGB', dropout=0.5, \
+            base_model='se_resnext50_32x4d', img_feature_dim=224, pretrain='imagenet', \
+            temporal_pool=False, is_shift = True, shift_div=8, shift_place='blockres', \
+            partial_bn=False, consensus_type='avg', custom_weights = True)
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
     if INFER in ['VAL', 'TRN']:
@@ -393,4 +401,9 @@ for epoch in range(EPOCHS):
             ypredvalbag = sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
+        logger.info('Write out bagged prediction to preds folder')
+        yvaldf = valdataset.data.iloc[valids][['video', 'label']]
+        yvaldf['pred'] = ypredval 
+        yvaldf.to_csv('preds/dfake_tsm_sub_epoch{}_fold{}.csv.gz'.format(epoch, FOLD), \
+            index = False, compression = 'gzip')
         del yactval, ypredval, valids

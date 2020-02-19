@@ -5,6 +5,7 @@ from torchvision import models
 import torch.nn.functional as F
 import os, math
 import pretrainedmodels
+import timm
 device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # os.environ['TORCH_HOME'] = WTSPATH
 from shufflenet_v2_plus import ShuffleNetV2_Plus as shufflenetv2plus
@@ -53,9 +54,14 @@ class MixNet(nn.Module):
         os.environ['TORCH_HOME'] = folder
         self.senet = timm.create_model(modtype, pretrained=True)
         self.num_class = num_class
+        if modtype == 'mixnet_l':
+            indim = 264
+        if modtype == 'mixnet_xl':
+            indim = 320 
         outdim = 512
-        self.conv_head = nn.Sequential( \
-                nn.Conv2d(1536, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+
+        self.senet.conv_head = nn.Sequential( \
+                nn.Conv2d(indim, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
                 nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True))
         self.fc = nn.Linear(outdim, num_class)
 
@@ -267,11 +273,11 @@ class SPPNet(nn.Module):
 
         elif  self.arch == 'mixnet_l':
             self.model = MixNet(folder = folder, num_class=num_class, pretrained=pretrained, modtype = 'mixnet_l')
-            self.c = 1536
+            self.c = 264
             
         elif  self.arch == 'mixnet_xl':
             self.model = MixNet(folder = folder, num_class=num_class, pretrained=pretrained, modtype = 'mixnet_xl')
-            self.c = 1536
+            self.c = 320
         
         elif  self.arch == 'shufflenet':
             self.model = ShuffleNet(folder = folder, num_class=num_class, pretrained=pretrained)

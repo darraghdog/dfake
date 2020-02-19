@@ -5,15 +5,16 @@ from torchvision import models
 import torch.nn.functional as F
 import os, math
 import pretrainedmodels
+import timm
 device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # os.environ['TORCH_HOME'] = WTSPATH
 from shufflenet_v2_plus import ShuffleNetV2_Plus as shufflenetv2plus
 
 
 '''
-model=shufflenetv2plus(model_size='Large',  device = device)
+model = shufflenetv2plus(model_size='Medium',  device = device)
 model.conv_last = nn.Sequential( \
-                        nn.Conv2d(672, 512, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                        nn.Conv2d(512, 512, kernel_size=(1, 1), stride=(1, 1), bias=False), \
                         nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
                         nn.ReLU(inplace=True))
 x = torch.zeros(2,3,224,224)
@@ -27,37 +28,14 @@ class ShuffleNet(nn.Module):
         super(ShuffleNet, self).__init__()
         
         os.environ['TORCH_HOME'] = folder
-        self.senet = shufflenetv2plus(model_size='Medium', return_type='before_pool', device = device)
+        self.senet = shufflenetv2plus(model_size='Large', return_type='before_pool', device = device)
         self.num_class = num_class
         outdim = 512
         self.senet.conv_last = nn.Sequential( \
-                        nn.Conv2d(512, 512, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                        nn.Conv2d(672, 512, kernel_size=(1, 1), stride=(1, 1), bias=False), \
                         nn.BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), \
                         nn.ReLU(inplace=True))
         # self.fc = nn.Linear(outdim, num_class)
-
-    def conv_base(self, x):
-        layer = self.senet(x)
-        return layer
-
-    def forward(self, x):
-        layer = self.senet(x)
-        return layer 
-
-
-class MixNet(nn.Module):
-    def __init__(self, layers=18, num_class=2, pretrained=False, \
-                 folder = None, modtype = 'mixnet_l'):
-        super(MixNet, self).__init__()
-        
-        os.environ['TORCH_HOME'] = folder
-        self.senet = timm.create_model(modtype, pretrained=True)
-        self.num_class = num_class
-        outdim = 512
-        self.conv_head = nn.Sequential( \
-                nn.Conv2d(1536, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
-                nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True))
-        self.fc = nn.Linear(outdim, num_class)
 
     def conv_base(self, x):
         layer = self.senet(x)
@@ -129,7 +107,7 @@ class SeNet(nn.Module):
         
         os.environ['TORCH_HOME'] = folder
         model_func = pretrainedmodels.__dict__['se_resnext50_32x4d']
-        self.senet = model_func(num_classes=1000, pretrained='imagenet')
+        self.senet = model_func(num_classes=1000, pretrained=None)#'imagenet')
         self.num_class = num_class
         outdim = 512
         self.conv_head = nn.Sequential( \
@@ -157,7 +135,29 @@ class SeNet(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
-    
+
+class MixNet(nn.Module):
+    def __init__(self, layers=18, num_class=2, pretrained=False, \
+                 folder = None, modtype = 'mixnet_l'):
+        super(MixNet, self).__init__()
+        
+        os.environ['TORCH_HOME'] = folder
+        self.senet = timm.create_model(modtype, pretrained=True)
+        self.num_class = num_class
+        outdim = 512
+        self.conv_head = nn.Sequential( \
+                nn.Conv2d(1536, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
+                nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True))
+        self.fc = nn.Linear(outdim, num_class)
+
+    def conv_base(self, x):
+        layer = self.senet(x)
+        return layer
+
+    def forward(self, x):
+        layer = self.senet(x)
+        return layer 
+
 class ResNet(nn.Module):
     def __init__(self, layers=18, num_class=2, pretrained=False, folder = None):
         super(ResNet, self).__init__()
@@ -272,7 +272,7 @@ class SPPNet(nn.Module):
         elif  self.arch == 'mixnet_xl':
             self.model = MixNet(folder = folder, num_class=num_class, pretrained=pretrained, modtype = 'mixnet_xl')
             self.c = 1536
-        
+
         elif  self.arch == 'shufflenet':
             self.model = ShuffleNet(folder = folder, num_class=num_class, pretrained=pretrained)
             print(50*'--')
@@ -290,8 +290,6 @@ class SPPNet(nn.Module):
             features = self.model.features(x)
             x = F.relu(features, inplace=True)
         elif self.arch == 'shufflenet':
-            x = self.model(x)
-        elif 'mixnet' in self.arch:
             x = self.model(x)
         x = self.spp(x)
         # x = self.classifier(x)

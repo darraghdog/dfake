@@ -60,9 +60,8 @@ class MixNet(nn.Module):
             indim = 320 
         outdim = 512
 
-        self.senet.conv_head = nn.Sequential( \
-                nn.Conv2d(indim, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False), \
-                nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True))
+        self.senet.conv_head = nn.Conv2d(indim, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False)
+        self.senet.bn2 = nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
         self.fc = nn.Linear(outdim, num_class)
 
     def conv_base(self, x):

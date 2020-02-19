@@ -21,6 +21,13 @@ x = torch.zeros(2,3,224,224)
 out = model(x)
 out.shape
 '''
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+        
+    def forward(self, x):
+        return x
+
 
 class ShuffleNet(nn.Module):
     def __init__(self, layers=18, num_class=2, pretrained=False, \
@@ -59,14 +66,18 @@ class MixNet(nn.Module):
         if modtype == 'mixnet_xl':
             indim = 320 
         outdim = 512
-
         self.senet.conv_head = nn.Conv2d(indim, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False)
         self.senet.bn2 = nn.BatchNorm2d(outdim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-        self.fc = nn.Linear(outdim, num_class)
+        #self.senet.global_pool = Identity()
+        #self.senet.classifier = Identity()
+        #self.fc = nn.Linear(outdim, num_class)
 
     def conv_base(self, x):
-        layer = self.senet(x)
-        return layer
+        x = self.senet.conv_stem(x)
+        x = self.senet.bn1(x)
+        x = self.senet.conv_head(x)
+        x = self.senet.bn2(x)        
+        return x
 
     def forward(self, x):
         layer = self.senet(x)
@@ -297,7 +308,7 @@ class SPPNet(nn.Module):
         elif self.arch == 'shufflenet':
             x = self.model(x)
         elif 'mixnet' in self.arch:
-            x = self.model(x)
+            x = self.model.conv_base(x)
         x = self.spp(x)
         # x = self.classifier(x)
         return x

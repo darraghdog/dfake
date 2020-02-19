@@ -22,7 +22,7 @@ import itertools
 import matplotlib.pylab as plt
 import warnings
 warnings.filterwarnings("ignore")
-
+sys.path.append('/share/dhanley2/dfake/scripts/spp28/opt/conda/lib/python3.6/site-packages')
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -33,7 +33,7 @@ from torch.utils.data import Dataset
 from sklearn.metrics import log_loss
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
-
+import timm
 
 from albumentations import (Cutout, Compose, Normalize, RandomRotate90, HorizontalFlip, RandomBrightnessContrast, 
                            VerticalFlip, ShiftScaleRotate, Transpose, OneOf, IAAAdditiveGaussianNoise,
@@ -187,43 +187,44 @@ p1 = 0.1
 trn_transforms = A.Compose([
         A.HorizontalFlip(p=0.5),
         A.OneOf([
-            A.Downscale(scale_min=0.5, scale_max=0.9, interpolation=0, always_apply=False, p=0.5),
+            A.Downscale(scale_min=0.5, scale_max=0.9, interpolation=0, always_apply=False, p=p1),
+            A.NoOp(p=p1*2),
             ]),
         A.OneOf([
             A.GaussNoise(var_limit=(100.0, 600.0), p=p1),
             A.ISONoise(color_shift=(0.2, 0.25), intensity=(0.2, 0.25), p=p1),
             A.MultiplicativeNoise(multiplier=[0.7, 1.6], elementwise=False, per_channel=False, p=p1),
-            A.NoOp(p=p1*3),
+            A.NoOp(p=p1*9),
             ]),
         A.OneOf([
             A.Blur(blur_limit=15, p=p1),
             A.GaussianBlur(blur_limit=15, p=p1), 
             A.MotionBlur(blur_limit=(15), p=p1), 
             A.MedianBlur(blur_limit=10, p=p1),
-            A.NoOp(p=p1*3),
+            A.NoOp(p=p1*9),
             ]),
         A.OneOf([
              A.RandomGamma(gamma_limit=(50, 150), p=p1),
              A.RandomBrightness(limit=0.4, p=p1),
              A.RandomContrast(limit=0.4, p=p1),
-             A.NoOp(p=p1*3),
+             A.NoOp(p=p1*9),
             ]),
         A.OneOf([
-             A.JpegCompression(quality_lower=30, quality_upper=100, always_apply=False, p=p1),
-             A.ImageCompression(quality_lower=30, quality_upper=100, always_apply=False, p=p1),
-             A.NoOp(p=p1*2),
+             A.JpegCompression(quality_lower=60, quality_upper=100, always_apply=False, p=p1),
+             A.ImageCompression(quality_lower=60, quality_upper=100, always_apply=False, p=p1),
+             A.NoOp(p=p1*6),
             ]),
-        A.OneOf([
-             A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, drop_color=(200, 200, 200), p=p1),
-             A.RandomShadow( p=p1),
-             A.NoOp(p=p1*12),
-            ]),
-        A.OneOf([
-            A.CoarseDropout(max_holes=50, max_height=20, max_width=20, min_height=6, min_width=6, p=p1),
-            A.Cutout(num_holes=12, max_h_size=24, max_w_size=24, fill_value=255, p=p1),
-            A.CLAHE(clip_limit=2.0, p=p1),
-            A.NoOp(p=p1*12),
-            ]),
+        #A.OneOf([
+        #     A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, drop_color=(200, 200, 200), p=p1),
+        #     A.RandomShadow( p=p1),
+        #     A.NoOp(p=p1*12),
+        #    ]),
+        #A.OneOf([
+        #    A.CoarseDropout(max_holes=50, max_height=20, max_width=20, min_height=6, min_width=6, p=p1),
+        #    A.Cutout(num_holes=12, max_h_size=24, max_w_size=24, fill_value=255, p=p1),
+        #    A.CLAHE(clip_limit=2.0, p=p1),
+        #    A.NoOp(p=p1*12),
+        #    ]),
     ])
 
 val_transforms = Compose([
@@ -264,41 +265,14 @@ class DFakeDataset(Dataset):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
-        frames = np.load(fname)['arr_0']
-        if (SKIP>1) and (frames.shape[0] > SKIP*6):
-            every_k = random.randint(0,SKIP-1)
-            frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
-        framesbackup = frames.copy()
         try:
-            # if it is a FAKE label in trainnig, 60% apply mixing of augmentations
-            if self.train and (vid.label==1) and (random.randint(0,4)<3):
-                try:
-                    # Get out a random sample of fake and real
-                    ascdf = self.data[ self.data.original == vid.original].reset_index()
-                    ascdf = ascdf[['video', 'original']].drop_duplicates().reset_index(drop=True)
-                    ascls = [vid.video] + ascdf.sample(min(3, ascdf.shape[0])).video.tolist() + \
-                                    ascdf.original[:random.randint(0,2)].tolist()
-                    framesdict = dict((k, np.load(os.path.join(self.imgdir, k.replace('.mp4', '.npz')))['arr_0']) \
-                          for k in set(ascls) )
-                    frames = []
-                    # Pick from a random video
-                    if (SKIP>1) and (framesdict[vid.video].shape[0] > SKIP*6):
-                        every_k = random.randint(0,SKIP-1)
-                        for t,b in enumerate(framesdict[vid.video]):
-                            if t%SKIP!=every_k:
-                                continue
-                            try:
-                                randsamp = random.choice(ascls)
-                                frames.append(framesdict[randsamp][t])
-                            except:
-                                frames.append(b)
-                        frames = np.stack(frames)
-                    else:
-                        frames = framesbackup.copy()
-                except:
-                    frames = framesbackup.copy()
-            else:
-                frames = framesbackup.copy()
+            frames = np.load(fname)['arr_0']
+            # shp1 = frames.shape
+            if (SKIP>1) and (frames.shape[0] > SKIP*6):
+                every_k = random.randint(0,SKIP-1)
+                frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
+            # shp2 = frames.shape
+            # logger.info(f'{shp1} {shp2}')
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):

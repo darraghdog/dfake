@@ -22,7 +22,7 @@ import itertools
 import matplotlib.pylab as plt
 import warnings
 warnings.filterwarnings("ignore")
-
+sys.path.append('/share/dhanley2/dfake/scripts/opt/conda/lib/python3.6/site-packages')
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -71,6 +71,8 @@ parser.add_option('-p', '--start', action="store", dest="start", help="Start epo
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
 parser.add_option('-s', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
+parser.add_option('-t', '--arch', action="store", dest="arch", help="Architecture", default="mixnet_l")
+parser.add_option('-u', '--loss', action="store", dest="loss", help="Loss Function", default="ce")
 
 
 options, args = parser.parse_args()
@@ -82,6 +84,7 @@ from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from sort import *
 from sppnet import SPPNet
+from loss_bitempered import BiTemperedLoss
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -276,8 +279,8 @@ class DFakeDataset(Dataset):
                     # Get out a random sample of fake and real
                     ascdf = self.data[ self.data.original == vid.original].reset_index()
                     ascdf = ascdf[['video', 'original']].drop_duplicates().reset_index(drop=True)
-                    ascls = [vid.video] + ascdf.sample(min(3, ascdf.shape[0])).video.tolist() + \
-                                    ascdf.original[:random.randint(1,4)].tolist()
+                    ascls = [vid.video]*3 + ascdf.sample(min(1, ascdf.shape[0])).video.tolist() + \
+                                    ascdf.original[:random.randint(0,5)].tolist()
                     framesdict = dict((k, np.load(os.path.join(self.imgdir, k.replace('.mp4', '.npz')))['arr_0']) \
                           for k in set(ascls) )
                     frames = []
@@ -363,10 +366,9 @@ valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_wo
 logger.info('Create model')
 poolsize=(1, 2) # , 6)
 embedsize = 512*sum(i**2 for i in poolsize)
-# embedsize = 384*sum(i**2 for i in poolsize)
 
 model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  architecture = 'seresnext', dropout = 0.2, embed_size = embedsize)
+                  architecture = options.arch, dropout = 0.2, embed_size = embedsize)
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -379,7 +381,12 @@ optimizer = optim.Adam(plist, lr=LR)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
 
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
-criterion = torch.nn.BCEWithLogitsLoss()
+if options.loss=='ce':
+    criterion = torch.nn.BCEWithLogitsLoss()
+elif options.loss=='bit':
+    bitemp_T1, bitemp_T2, smooth_epsilon, reduction = 0.85, 1.2, 0.025
+    reduction='mean'
+    criterion = BiTemperedLoss(bitemp_T1, bitemp_T2, smooth_epsilon, reduction)
 
 if n_gpu > 0:
     model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
@@ -389,11 +396,11 @@ for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
-    model_file_name = 'weights/sppnet_seresnext_epoch{}_lr{}_accum{}_fold{}.bin'.format(epoch, LR, ACCUM, FOLD)
+    model_file_name = 'weights/sppnet_{}_epoch{}_lr{}_accum{}_fold{}.bin'.format(options.arch, epoch, LR, ACCUM, FOLD)
     if epoch<START:
         if epoch == (START - 1):
             model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  architecture = 'seresnext', dropout = 0.2, embed_size = embedsize)
+                  architecture = options.arch, dropout = 0.2, embed_size = embedsize)
             if n_gpu > 0:
                 model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
             model.load_state_dict(torch.load(model_file_name))
@@ -429,7 +436,7 @@ for epoch in range(EPOCHS):
         scheduler.step()
     else:
         model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  architecture = 'seresnext', dropout = 0.2, embed_size = embedsize)
+                  architecture = options.arch, dropout = 0.2, embed_size = embedsize)
         if n_gpu > 0:
             model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
         model.load_state_dict(torch.load(model_file_name))

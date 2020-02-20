@@ -1,5 +1,9 @@
 Experiments
 ================
+sppal02 - Resnet34 on aligned crops
+sppal03 - Shufflnet medium
+sppal04 - Resnet34 - just take 4 frames
+
 spp08 - lots of augmentation
 spp11 - variable sized images; reduce spatial pooling to (1, 2) and (1, 2, 4)
 spp12 - reproduce spp08
@@ -8,13 +12,28 @@ spp14 - Resnet50
 spp15 - Seresnext
 spp17 - Resnet50 with masking of LSTM output
 spp18 - Resnet50 with masking & lookahead
-spp19 - Resnet50 spp14 with on pose images
-spp20 - Resnet50 spp17 with on pose images
+spp19 - Resnet50 spp14 with on 1) pose images 2) variable centered
+spp20 - Resnet50 spp17 with on 1) pose images 2) variabble centered
+spp21 - Resnet50 spp19 with crop faces
+spp22 - Resnet34 with 4FPS
+spp23 - Resnte34 2FPS & 4FPS with limited pooling (1,2)
+spp24 - SeResnext 2FPS & 4FPS with limited pooling (1,2)
+spp25 - Resnte34 2FPS & 4FPS with limited pooling (1,2) /// New val
+spp26 - SeResnext dual loss
+spp27 - Copy spp24 - Frames from different videos
+spp28 - Copy spp24 - reduce augmentation
+spp29 - Mixnet_l
+spp30 - Mixnet30 with frames from other vids
+spp31 - Mixnet_xl low aug, and take other frames
+spp32 - Mixnet xl low aug, no other frames, 5 fold
+spp33 - Efficientnet b2 ns; copy from spp32
 
 tsm01 - TSM Base and with LSTM at end
 tsm02 - TSM Base parallelised
 tsm03 - TSM on SeResNext
 tsm04 - TSM Base, blockres fold_div 4
+tsm06 - Take 2 FPS
+tsm07 - tune dropout
 
 Ideas 
 ========

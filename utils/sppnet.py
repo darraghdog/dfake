@@ -5,7 +5,10 @@ from torchvision import models
 import torch.nn.functional as F
 import os, math
 import pretrainedmodels
-import timm
+try:
+    import timm
+except:
+    print('timm not set up...')
 device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # os.environ['TORCH_HOME'] = WTSPATH
 from shufflenet_v2_plus import ShuffleNetV2_Plus as shufflenetv2plus
@@ -75,6 +78,7 @@ class MixNet(nn.Module):
     def conv_base(self, x):
         x = self.senet.conv_stem(x)
         x = self.senet.bn1(x)
+        x = self.senet.blocks(x)
         x = self.senet.conv_head(x)
         x = self.senet.bn2(x)        
         return x

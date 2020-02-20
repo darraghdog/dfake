@@ -3,7 +3,7 @@
 # Ji Lin*, Chuang Gan, Song Han
 # {jilin, songhan}@mit.edu, ganchuang@csail.mit.edu
 # Lifted from git - 
-
+import os
 import torchvision
 import random
 from PIL import Image, ImageOps
@@ -253,6 +253,8 @@ class TSN(nn.Module):
                         getattr(torchvision.models, base_model)(not self.custom_weights)
             elif 'se_resnext' in base_model:
                 import pretrainedmodels
+                os.environ['TORCH_MODEL_ZOO'] = os.getcwd()
+                os.environ['TORCH_HOME'] = os.getcwd()
                 model_func = pretrainedmodels.__dict__[base_model]
                 self.base_model = model_func(num_classes=1000, pretrained='imagenet')
             if self.is_shift:

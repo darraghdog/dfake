@@ -86,6 +86,36 @@ class MixNet(nn.Module):
     def forward(self, x):
         layer = self.senet(x)
         return layer 
+    
+class EffNs(nn.Module):
+    def __init__(self, layers=18, num_class=2, pretrained=False, \
+                 folder = None, modtype = 'tf_efficientnet_b2_ns'):
+        super(EffNs, self).__init__()
+        
+        os.environ['TORCH_HOME'] = folder
+        self.senet = timm.create_model(modtype, pretrained=True)
+        self.num_class = num_class
+        if modtype == 'tf_efficientnet_b2_ns':
+            indim = 352
+        if modtype == 'tf_efficientnet_b1_ns':
+            indim = 320 
+        outdim = 512
+        self.senet.conv_head = nn.Conv2d(indim, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False)
+        self.senet.bn2 = nn.BatchNorm2d(outdim, eps=0.001, momentum=0.1, affine=True, track_running_stats=True)
+
+    def conv_base(self, x):
+        x = self.senet.conv_stem(x)
+        x = self.senet.bn1(x)
+        x = self.senet.act1(x)
+        x = self.senet.blocks(x)
+        x = self.senet.conv_head(x)
+        x = self.senet.bn2(x)        
+        x = self.senet.act2(x)        
+        return x
+
+    def forward(self, x):
+        layer = self.senet(x)
+        return layer 
 
 ''''
 folder='/Users/dhanley2/Documents/Personal/dfake/weights'
@@ -286,12 +316,20 @@ class SPPNet(nn.Module):
             self.c = 2048
 
         elif  self.arch == 'mixnet_l':
-            self.model = MixNet(folder = folder, num_class=num_class, pretrained=pretrained, modtype = 'mixnet_l')
+            self.model = MixNet(folder = folder, num_class=num_class, pretrained=pretrained, \
+                                modtype = 'mixnet_l')
             self.c = 264
             
         elif  self.arch == 'mixnet_xl':
-            self.model = MixNet(folder = folder, num_class=num_class, pretrained=pretrained, modtype = 'mixnet_xl')
+            self.model = MixNet(folder = folder, num_class=num_class, pretrained=pretrained, \
+                                modtype = 'mixnet_xl')
             self.c = 320
+        
+        elif  'tf_efficientnet_' in self.arch:
+            self.model = EffNs(folder = folder, num_class=num_class, pretrained=pretrained, \
+                               modtype = self.arch)
+            self.c = 320
+        
         
         elif  self.arch == 'shufflenet':
             self.model = ShuffleNet(folder = folder, num_class=num_class, pretrained=pretrained)
@@ -312,6 +350,8 @@ class SPPNet(nn.Module):
         elif self.arch == 'shufflenet':
             x = self.model(x)
         elif 'mixnet' in self.arch:
+            x = self.model.conv_base(x)
+        elif 'tf_efficientnet_' in self.arch:
             x = self.model.conv_base(x)
         x = self.spp(x)
         # x = self.classifier(x)

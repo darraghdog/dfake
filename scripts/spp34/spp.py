@@ -20,6 +20,7 @@ import optparse
 import itertools
 #from facenet_pytorch import MTCNN, InceptionResnetV1
 import matplotlib.pylab as plt
+import itertools
 import warnings
 warnings.filterwarnings("ignore")
 # sys.path.append('/share/dhanley2/dfake/scripts/opt/conda/lib/python3.6/site-packages')
@@ -72,6 +73,9 @@ parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulat
 parser.add_option('-s', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
 parser.add_option('-t', '--arch', action="store", dest="arch", help="Architecture", default="mixnet_l")
 parser.add_option('-u', '--stop', action="store", dest="stop", help="Start epochs", default="13")
+parser.add_option('-v', '--fakesamp', action="store", dest="fakesamp", help="Mix in ratio of fake samples", default="0")
+parser.add_option('-w', '--origsamp', action="store", dest="origsamp", help="Max mix in ratio of original", default="0")
+parser.add_option('-x', '--realsamp', action="store", dest="realsamp", help="Max mix in ratio of other reals", default="0")
 
 
 options, args = parser.parse_args()
@@ -85,6 +89,8 @@ from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from sort import *
 from sppnet import SPPNet
 import timm
+from splits import  load_folds, get_real_to_fake_dict_v2, get_cluster_data
+
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -115,6 +121,10 @@ LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
+ORIGSAMP=int(options.origsamp)
+FAKESAMP=int(options.fakesamp)
+REALSAMP=int(options.realsamp)
+
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
@@ -124,10 +134,16 @@ logger.info('Full video file shape {} {}'.format(*metadf.shape))
 n_gpu = torch.cuda.device_count()
 logger.info('Cuda n_gpus : {}'.format(n_gpu ))
 
-#os.environ['TORCH_HOME'] = WTSFILES
-#m = timm.create_model('mixnet_l', pretrained=True)
+METADATA_PATH=os.path.join(INPATH, 'data/splits')
+REAL_VIDEO_TO_CLUSTER, FAKE_VIDEO_TO_CLUSTER, CLUSTER_TO_REAL_VIDEOS, \
+            CLUSTER_TO_FAKE_VIDEOS, CLUSTER_TO_DESCRIPTOR = \
+            get_cluster_data(METADATA_PATH)
 
+ACTORS = [[i+'.mp4' for i in m] for m in CLUSTER_TO_REAL_VIDEOS.values()]
+REALVIDSAMEACTOR = dict(itertools.chain(*[[(im, m) for im in  m] \
+                                           for m in ACTORS]))
 
+random.sample(REALVIDSAMEACTOR['eopcdsfkzm.mp4'], 3)
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
     def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
@@ -223,17 +239,6 @@ trn_transforms = A.Compose([
              A.ImageCompression(quality_lower=60, quality_upper=100, always_apply=False, p=p1),
              A.NoOp(p=p1*6),
             ]),
-        #A.OneOf([
-        #     A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, drop_color=(200, 200, 200), p=p1),
-        #     A.RandomShadow( p=p1),
-        #     A.NoOp(p=p1*12),
-        #    ]),
-        #A.OneOf([
-        #    A.CoarseDropout(max_holes=50, max_height=20, max_width=20, min_height=6, min_width=6, p=p1),
-        #    A.Cutout(num_holes=12, max_h_size=24, max_w_size=24, fill_value=255, p=p1),
-        #    A.CLAHE(clip_limit=2.0, p=p1),
-        #    A.NoOp(p=p1*12),
-        #    ]),
     ])
 
 val_transforms = Compose([
@@ -281,15 +286,25 @@ class DFakeDataset(Dataset):
         framesbackup = frames.copy()
         try:
             # if it is a FAKE label in trainnig, 60% apply mixing of augmentations
-            if self.train and (vid.label==1) and (random.randint(0,4)<3):
+            if self.train:
                 try:
                     # Get out a random sample of fake and real
                     ascdf = self.data[ self.data.original == vid.original].reset_index()
                     ascdf = ascdf[['video', 'original']].drop_duplicates().reset_index(drop=True)
-                    ascls = [vid.video] + ascdf.sample(min(3, ascdf.shape[0])).video.tolist() + \
-                                    ascdf.original[:random.randint(0,2)].tolist()
-                    framesdict = dict((k, np.load(os.path.join(self.imgdir, k.replace('.mp4', '.npz')))['arr_0']) \
-                          for k in set(ascls) )
+                    
+                    if vid.label==1:
+                        mixinfake = min(random.randint(0,FAKESAMP), ascdf.shape[0])
+                        mixinorig = min(random.randint(0,ORIGSAMP), ascdf.shape[0])
+                        ascls = [vid.video] + ascdf.sample(  mixinfake ).video.tolist() + \
+                                        ascdf.original[: mixinorig  ].tolist()
+
+                    if vid.label==0:
+                        mixinreal = min(random.randint(0,REALSAMP), ascdf.shape[0])
+                        ascls = [vid.video] + random.sample(REALVIDSAMEACTOR[vid.video], mixinreal)
+                        
+                    framesdict = dict((k, np.load(os.path.join(self.imgdir, \
+                                        k.replace('.mp4', '.npz')))['arr_0']) \
+                                        for k in set(ascls) )
                     frames = []
                     # Pick from a random video
                     if (SKIP>1) and (framesdict[vid.video].shape[0] > SKIP*6):

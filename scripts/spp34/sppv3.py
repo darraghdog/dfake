@@ -267,15 +267,9 @@ trn_transforms = A.Compose([
 
 val_transforms = Compose([
     NoOp(),
-    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
-    ])
-val_transforms = Compose([
-    NoOp(),
-    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
 
 transform_norm = Compose([
-    #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
     ToTensor()
     ])
@@ -288,9 +282,9 @@ small_val_transforms = Compose([
 
 
 def makevaldf(yactval, ypredval):
-    vdf = pd.DataFrame({'label': yactval, 'pred': ypredval})
-    vdf = pd.concat([vdf.query('label == 0')]*5+[vdf.query('label == 1')])
-    return vdf    
+    df = pd.DataFrame({'label': yactval, 'pred': ypredval})
+    df = pd.concat([df.query('label == 0')]*5+[df.query('label == 1')])
+    return df    
 
 class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, framels, small=False, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP):
@@ -311,7 +305,12 @@ class DFakeDataset(Dataset):
         self.train = train
         self.val = val
         self.norm = transform_norm
-        self.transform = trn_transforms if not val else (val_transforms if not small else small_val_transforms )
+        if train: self.transform = trn_transforms 
+        if val:
+            if small: 
+                self.transform = small_val_transforms 
+            else:
+                self.transform = val_transforms
   
     def __len__(self):
         return len(self.data)
@@ -423,9 +422,9 @@ trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 FRAMELS = pd.read_csv(os.path.join(IMGDIR, '../cropped_faces08.txt'), header=None).iloc[:,0].tolist()
-trndataset = DFakeDataset(trndf.head(2000), IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
-valdataset = DFakeDataset(valdf.head(2000), IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
-smldataset = DFakeDataset(valdf.head(2000), IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP, small=True)
+trndataset = DFakeDataset(trndf, IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
+valdataset = DFakeDataset(valdf, IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
+smldataset = DFakeDataset(valdf, IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP, small=True)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 smlloader = DataLoader(smldataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
@@ -516,7 +515,7 @@ for epoch in range(EPOCHS):
         logger.info('Evaluate on 88')
         ypredval, valids, yactval = predictval(model, smlloader)
         ypredvalsmls.append(ypredval)
-        vdf = makevaldf(yactval, smldataset.data.iloc[valids].label.values)
+        vdf = makevaldf(yactval, ypredval)
         vdfb = makevaldf(yactval, sum(ypredvalsmls[-BAGS:])/len(ypredvalsmls[-BAGS:])  )
         for c in [.01] :
             valloss = log_loss(vdf.label.values, vdf.pred.values.clip(c,1-c))
@@ -527,7 +526,7 @@ for epoch in range(EPOCHS):
         logger.info('Evaluate on 224')      
         ypredval, valids, yactval = predictval(model, valloader)
         ypredvalls.append(ypredval)
-        vdf = makevaldf(yactval, valdataset.data.iloc[valids].label.values)
+        vdf = makevaldf(yactval, ypredval)
         vdfb = makevaldf(yactval, sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])  )
         for c in [.01] :
             valloss = log_loss(vdf.label.values, vdf.pred.values.clip(c,1-c))

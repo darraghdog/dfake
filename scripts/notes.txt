@@ -26,7 +26,9 @@ spp29 - Mixnet_l
 spp30 - Mixnet30 with frames from other vids
 spp31 - Mixnet_xl low aug, and take other frames
 spp32 - Mixnet xl low aug, no other frames, 5 fold
-spp33 - Efficientnet b2 ns; copy from spp32
+spp33 - Efficientnet b1 & b2 ns; copy from spp32
+spp34 - Efficientnet b1 ns; test best combination of other frames
+spp35 - Efficientnet b2 ns - 5 fold
 
 tsm01 - TSM Base and with LSTM at end
 tsm02 - TSM Base parallelised

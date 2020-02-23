@@ -6,9 +6,9 @@ ACCUM=1
 BSIZE=4
 LR=0.00005
 
-for FAKE in 1  2
+for FAKE in 1 # 2
 do
-    for REAL in 2  0
+    for REAL in 2 4 6
     do
         bsub  -q low2 -gpu "num=$N_GPU:mode=exclusive_process" -app gpu -n =$N_GPU  -env LSB_CONTAINER_IMAGE=darraghdog/kaggle:dfake5 \
                 -m dbslp1827  -n 1 -R "span[ptile=4]" -o log_train_%J  sh -c "cd /share/dhanley2/dfake/scripts/$WDIR && python3 spp.py \

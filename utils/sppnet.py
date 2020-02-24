@@ -95,9 +95,13 @@ class EffNs(nn.Module):
         os.environ['TORCH_HOME'] = folder
         self.senet = timm.create_model(modtype, pretrained=True)
         self.num_class = num_class
+        if modtype == 'tf_efficientnet_b3_ns':
+            indim = 384
         if modtype == 'tf_efficientnet_b2_ns':
             indim = 352
         if modtype == 'tf_efficientnet_b1_ns':
+            indim = 320
+        if modtype == 'tf_efficientnet_b0_ns':
             indim = 320 
         outdim = 512
         self.senet.conv_head = nn.Conv2d(indim, outdim, kernel_size=(1, 1), stride=(1, 1), bias=False)

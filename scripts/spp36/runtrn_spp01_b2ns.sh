@@ -17,3 +17,4 @@ do
                 --skip 4 --start 0 --epochs 20 --arch tf_efficientnet_b2_ns \
                 --origsamp $FAKE --fakesamp $FAKE --realsamp $REAL "
 done
+

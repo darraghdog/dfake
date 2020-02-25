@@ -1,5 +1,5 @@
 N_GPU=1
-WDIR='spp36'
+WDIR='spp37'
 FOLD=0
 SIZE='224'
 ACCUM=1
@@ -15,6 +15,6 @@ do
                 --wtspath weights  --fold $FOLD  --rootpath /share/dhanley2/dfake/ --metafile trainmeta.csv.gz  \
                 --accum $ACCUM --imgpath data/mount/npimg08 --size $SIZE --batchsize $BSIZE --lr $LR \
                 --skip 4 --start 0 --epochs 20 --arch tf_efficientnet_b2_ns \
-                --origsamp $FAKE --fakesamp $FAKE --realsamp $REAL "
+                --jpegcomplwr 30 --resizelwr 0.5 --origsamp $FAKE --fakesamp $FAKE --realsamp $REAL "
 done
 

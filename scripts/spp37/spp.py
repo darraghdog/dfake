@@ -324,10 +324,16 @@ class DFakeDataset(Dataset):
         try:
             frames = np.load(fname)['arr_0']
             # shp1 = frames.shape
-            if (SKIP>1) and (frames[:,:-1].shape[0] > SKIP*6):
+            if (SKIP>1) and (frames[:-1].shape[0] > SKIP*6):
                 every_k = random.randint(0,SKIP-1)
-                frames = np.stack([b for t,b in enumerate(frames[:,:-1]) if t%SKIP==every_k])
-                frameshat = np.stack([b for t,b in enumerate(frames[:,1:]) if t%SKIP==every_k])
+                frameshat = np.stack([b for t,b in enumerate(frames[1:]) if t%SKIP==every_k])
+                frames = np.stack([b for t,b in enumerate(frames[:-1]) if t%SKIP==every_k])
+            else:
+                frameshat=frames[1:]
+                frames = frames [:-1]
+            #logger.info(50*'--')
+            #logger.info(f'{vid.video} : {frames.shape}')
+            #logger.info(f'{vid.video} : {frameshat.shape}')
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
@@ -462,7 +468,7 @@ for epoch in range(EPOCHS):
             xdiff = torch.autograd.Variable(xdiff, requires_grad=True)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)
-            out = model(x, xhat)
+            out = model(x, xdiff)
             # Get loss
             loss = criterion(out, y)
             tr_loss += loss.item()

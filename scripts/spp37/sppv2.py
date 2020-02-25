@@ -214,7 +214,8 @@ def predictval(model, loader):
     with torch.no_grad():
         for step, batch in enumerate(loader):
             x = batch['frames'].to(device, dtype=torch.float)
-            out = model(x)
+            xdiff = batch['framesdiff'].to(device, dtype=torch.float)
+            out = model(x, xdiff)
             out = torch.sigmoid(out)
             ypredval.append(out.cpu().detach().numpy())
             valids.append(batch['ids'].cpu().detach().numpy())

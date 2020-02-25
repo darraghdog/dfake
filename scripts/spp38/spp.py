@@ -72,12 +72,11 @@ parser.add_option('-q', '--infer', action="store", dest="infer", help="root dire
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
 parser.add_option('-s', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
 parser.add_option('-t', '--arch', action="store", dest="arch", help="Architecture", default="mixnet_l")
-parser.add_option('-u', '--stop', action="store", dest="stop", help="Start epochs", default="15")
+parser.add_option('-u', '--stop', action="store", dest="stop", help="Start epochs", default="13")
 parser.add_option('-v', '--fakesamp', action="store", dest="fakesamp", help="Mix in ratio of fake samples", default="0")
 parser.add_option('-w', '--origsamp', action="store", dest="origsamp", help="Max mix in ratio of original", default="0")
 parser.add_option('-x', '--realsamp', action="store", dest="realsamp", help="Max mix in ratio of other reals", default="0")
-parser.add_option('-y', '--jpegcomplwr', action="store", dest="jpegcomplwr", help="Lower bound for jpeg or image compression", default="30")
-parser.add_option('-z', '--resizelwr', action="store", dest="resizelwr", help="Lower bound for resizing", default="0.3")
+
 
 options, args = parser.parse_args()
 INPATH = options.rootpath
@@ -125,8 +124,7 @@ ACCUM=int(options.accum)
 ORIGSAMP=int(options.origsamp)
 FAKESAMP=int(options.fakesamp)
 REALSAMP=int(options.realsamp)
-JPEGCOMPRESSION=int(options.jpegcomplwr)
-RESIZERATIO=float(options.resizelwr)
+
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
@@ -153,28 +151,22 @@ class SPPSeqNet(nn.Module):
         # Only resnet is supported in this version
         super(SPPSeqNet, self).__init__()
         logger.info('{} {} {}'.format(architecture, backbone, WTSPATH))
-        self.sppnetraw = SPPNet(architecture=architecture, backbone=backbone, pool_size=pool_size, folder=WTSPATH)
-        self.sppnetdiff = SPPNet(architecture=architecture, backbone=backbone, pool_size=pool_size, folder=WTSPATH)
-
+        self.sppnet = SPPNet(architecture=architecture, backbone=backbone, pool_size=pool_size, folder=WTSPATH)
         self.dense_units = dense_units
-        self.lstm1 = nn.LSTM(embed_size * 2, self.dense_units, bidirectional=True, batch_first=True)
+        self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
         self.linear_out = nn.Linear(self.dense_units*2, 1)
         self.embedding_dropout = SpatialDropout(dropout)
     
-    def forward(self, xraw, xdiff):
+    def forward(self, x):
         # Input is batch of image sequences
         batch_size, seqlen = x.size()[:2]
         # Flatten to make a single long list of frames
-        xraw = xraw.view(batch_size * seqlen, *xraw.size()[2:])
-        xdiff = xdiff.view(batch_size * seqlen, *xdiff.size()[2:])
+        x = x.view(batch_size * seqlen, *x.size()[2:])
         # Pass each frame thru SPPNet
-        embraw = self.sppnetraw(xraw.permute(0,3,1,2))
-        embdiff = self.sppnetdiff(xdiff.permute(0,3,1,2))
+        emb = self.sppnet(x.permute(0,3,1,2))
         # Split back out to batch
-        embraw = embraw.view(batch_size, seqlen, embraw.size()[1])
-        embdiff = embdiff.view(batch_size, seqlen, embdiff.size()[1])
-        emb = torch.cat((embraw, embdiff), -1)
+        emb = emb.view(batch_size, seqlen, emb.size()[1])
         emb = self.embedding_dropout(emb)
         
         # Pass batch thru sequential model(s)
@@ -200,40 +192,16 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def predictval(model, loader):
-    model.eval()
-    ypredval = []
-    valids = []
-    with torch.no_grad():
-        for step, batch in enumerate(loader):
-            x = batch['frames'].to(device, dtype=torch.float)
-            xdiff = batch['framesdiff'].to(device, dtype=torch.float)
-            out = model(x, xdiff)
-            out = torch.sigmoid(out)
-            ypredval.append(out.cpu().detach().numpy())
-            valids.append(batch['ids'].cpu().detach().numpy())
-            if step%200==0:
-                logger.info('Val step {} of {}'.format(step, len(loader)))
-    ypredval = np.concatenate(ypredval).flatten()
-    valids = np.concatenate(valids).flatten()
-    yactval = loader.dataset.data.iloc[valids].label.values
-    return ypredval, valids, yactval
-
 def snglaugfn():
     rot = random.randrange(-10, 10)
     dim1 = random.uniform(0.7, 1.0)
-    #dim2 = random.randrange(int(SIZE)*0.75, SIZE)
+    dim2 = random.randrange(int(SIZE)*0.75, SIZE)
     return Compose([
         ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
         CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
-        #Resize(dim2, dim2, interpolation=1,  p=0.5),
-     	   Resize(SIZE, SIZE, interpolation=1,  p=1),
+        Resize(dim2, dim2, interpolation=1,  p=0.5),
+        Resize(SIZE, SIZE, interpolation=1,  p=1),
         ])
-
-def makevaldf(yactval, ypredval):
-    df = pd.DataFrame({'label': yactval, 'pred': ypredval})
-    df = pd.concat([df.query('label == 0')]*5+[df.query('label == 1')])
-    return df   
 
 #mean_img = [0.4258249 , 0.31385377, 0.29170314]
 #std_img = [0.22613944, 0.1965406 , 0.18660679]
@@ -243,6 +211,10 @@ std_img = [0.229, 0.224, 0.225]
 p1 = 0.1
 trn_transforms = A.Compose([
         A.HorizontalFlip(p=0.5),
+        A.OneOf([
+            A.Downscale(scale_min=0.5, scale_max=0.9, interpolation=0, always_apply=False, p=p1),
+            A.NoOp(p=p1*2),
+            ]),
         A.OneOf([
             A.GaussNoise(var_limit=(100.0, 600.0), p=p1),
             A.ISONoise(color_shift=(0.2, 0.25), intensity=(0.2, 0.25), p=p1),
@@ -263,42 +235,32 @@ trn_transforms = A.Compose([
              A.NoOp(p=p1*9),
             ]),
         A.OneOf([
-            A.JpegCompression(quality_lower=JPEGCOMPRESSION, quality_upper=100, always_apply=False, p=p1),
-            A.ImageCompression(quality_lower=JPEGCOMPRESSION, quality_upper=100, always_apply=False, p=p1),
-            ]),
-        A.OneOf([
-            A.Downscale(scale_min=RESIZERATIO, scale_max=0.9, interpolation=cv2.INTER_NEAREST, always_apply=False, p=p1),
-            A.Downscale(scale_min=RESIZERATIO, scale_max=0.9, interpolation=cv2.INTER_LINEAR, always_apply=False, p=p1),
-            A.Downscale(scale_min=RESIZERATIO, scale_max=0.9, interpolation=cv2.INTER_CUBIC, always_apply=False, p=p1),
-            A.Downscale(scale_min=RESIZERATIO, scale_max=0.9, interpolation=cv2.INTER_AREA, always_apply=False, p=p1),
+             A.JpegCompression(quality_lower=60, quality_upper=100, always_apply=False, p=p1),
+             A.ImageCompression(quality_lower=60, quality_upper=100, always_apply=False, p=p1),
+             A.NoOp(p=p1*6),
             ]),
     ])
 
 val_transforms = Compose([
     NoOp(),
+    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
 
 transform_norm = Compose([
+    #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
     ToTensor()
     ])
-
-# Simulate downsize to 88
-small_val_transforms = Compose([
-    A.Downscale(scale_min=0.392, scale_max=0.392, interpolation=cv2.INTER_LINEAR, always_apply=False, p=p1),
-    ])
-
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, framels, small = False, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP):
+    def __init__(self, df, imgdir, framels, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
         self.framels = framels # os.listdir(imgdir)
         self.labels = labels
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
-        if train:
-            self.data = pd.concat([self.data.query('label == 0')]*5+\
+        self.data = pd.concat([self.data.query('label == 0')]*5+\
                                [self.data.query('label == 1')])
         self.data = self.data.sample(frac=1).reset_index(drop=True)
         # self.data = pd.concat([ self.data[self.data.video.str.contains('qirlrtrxba')],  self.data[:500].copy() ]).reset_index(drop=True)
@@ -308,12 +270,7 @@ class DFakeDataset(Dataset):
         self.train = train
         self.val = val
         self.norm = transform_norm
-        if train: self.transform = trn_transforms 
-        if val:
-            if small: 
-                self.transform = small_val_transforms 
-            else:
-                self.transform = val_transforms
+        self.transform = trn_transforms if not val else val_transforms
   
     def __len__(self):
         return len(self.data)
@@ -322,51 +279,77 @@ class DFakeDataset(Dataset):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
+        frames = np.load(fname)['arr_0']
+        if (SKIP>1) and (frames.shape[0] > SKIP*6):
+            every_k = random.randint(0,SKIP-1)
+            frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
+        framesbackup = frames.copy()
         try:
-            frames = np.load(fname)['arr_0']
-            # shp1 = frames.shape
-            if (SKIP>1) and (frames[:-1].shape[0] > SKIP*6):
-                every_k = random.randint(0,SKIP-1)
-                frameshat = np.stack([b for t,b in enumerate(frames[1:]) if t%SKIP==every_k])
-                frames = np.stack([b for t,b in enumerate(frames[:-1]) if t%SKIP==every_k])
+            # if it is a FAKE label in trainnig, 60% apply mixing of augmentations
+            if self.train:
+                try:
+                    # Get out a random sample of fake and real
+                    ascdf = self.data[ self.data.original == vid.original].reset_index()
+                    ascdf = ascdf[['video', 'original']].drop_duplicates().reset_index(drop=True)
+                    
+                    if vid.label==1:
+                        mixinfake = min(random.randint(0,FAKESAMP), ascdf.shape[0])
+                        mixinorig = min(random.randint(0,ORIGSAMP), ascdf.shape[0])
+                        mixinreal = min(random.randint(0,REALSAMP), ascdf.shape[0])
+                        ascls = [vid.video] + ascdf.sample(  mixinfake ).video.tolist() + \
+                                        random.sample(REALVIDSAMEACTOR[vid.video], mixinreal) # ascdf.original[: mixinorig  ].tolist()
+
+                    if vid.label==0:
+                        mixinreal = min(random.randint(0,REALSAMP), ascdf.shape[0])
+                        ascls = [vid.video] + random.sample(REALVIDSAMEACTOR[vid.video], mixinreal)
+                    # logger.info('{} : {}'.format(vid.label, ' '.join(ascls)  ) )    
+                    framesdict = dict((k, np.load(os.path.join(self.imgdir, \
+                                        k.replace('.mp4', '.npz')))['arr_0']) \
+                                        for k in set(ascls) )
+                    frames = []
+                    # Pick from a random video
+                    if (SKIP>1) and (framesdict[vid.video].shape[0] > SKIP*6):
+                        every_k = random.randint(0,SKIP-1)
+                        for t,b in enumerate(framesdict[vid.video]):
+                            if t%SKIP!=every_k:
+                                continue
+                            try:
+                                randsamp = random.choice(ascls)
+                                frames.append(framesdict[randsamp][t])
+                            except:
+                                frames.append(b)
+                        frames = np.stack(frames)
+                    else:
+                        frames = framesbackup.copy()
+                except:
+                    frames = framesbackup.copy()
             else:
-                frameshat=frames[1:]
-                frames = frames [:-1]
-            #logger.info(50*'--')
-            #logger.info(f'{vid.video} : {frames.shape}')
-            #logger.info(f'{vid.video} : {frameshat.shape}')
+                frames = framesbackup.copy()
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
                 xtra = frames.shape[0]-self.maxlen
                 shift = random.randint(0, xtra)
                 frames = frames[xtra-shift:xtra-shift+self.maxlen]
-                frameshat = frameshat[xtra-shift:xtra-shift+self.maxlen]
             else:
                 frames = frames[:self.maxlen]
-                frameshat = frameshat[:self.maxlen]
             d0,d1,d2,d3 = frames.shape
             augsngl = self.snglaug
             # Standard augmentation on each image
             augfn = self.snglaug()
-            if self.train : 
-                frames = np.stack([augfn(image=f)['image'] for f in frames])
-                frameshat = np.stack([augfn(image=f)['image'] for f in frameshat])
+            if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
             frames = frames.reshape(d0*d1, d2, d3)
-            frameshat = frameshat.reshape(d0*d1, d2, d3)
             if self.train or self.val:
-                frames = self.transform(image=frames)['image'] 
-                frameshat = self.transform(image=frameshat)['image'] 
-            frames = self.norm(image=frames)['image']
-            frameshat = self.norm(image=frameshat)['image']
+                augmented = self.transform(image=frames)
+                frames = augmented['image']               
+            augmented = self.norm(image=frames)
+            frames = augmented['image']
             frames = frames.resize_(d0,d1,d2,d3)
-            frameshat = frameshat.resize_(d0,d1,d2,d3)
-            framesdiff = frames - frameshat
             if self.train:
                 labels = torch.tensor(vid.label)
-                return {'frames': frames, 'framesdiff': framesdiff, 'idx': idx, 'labels': labels} 
+                return {'frames': frames, 'idx': idx, 'labels': labels}    
             else:      
-                return {'frames': frames, 'framesdiff': framesdiff, 'idx': idx}
+                return {'frames': frames, 'idx': idx}
         except Exception:
             logger.exception('Failed to load numpy array {}'.format(fname))
                
@@ -384,17 +367,13 @@ def collatefn(batch):
     x_batch = [l['frames'] if l['frames'].shape[0] == maxlen else \
          torch.cat((l['frames'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
          for l,sl in zip(batch, seqlen)]
-    x_batchdiff = [l['framesdiff'] if l['framesdiff'].shape[0] == maxlen else \
-         torch.cat((l['framesdiff'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
-         for l,sl in zip(batch, seqlen)]
     x_batch = torch.cat([x.unsqueeze(0) for x in x_batch])
-    x_batchdiff = torch.cat([x.unsqueeze(0) for x in x_batchdiff])
     
     if 'labels' in batch[0]:
         y_batch = torch.tensor([l['labels'] for l in batch])
-        return {'frames': x_batch, 'framesdiff': x_batchdiff, 'ids': ids, 'seqlen': seqlen, 'labels': y_batch}
+        return {'frames': x_batch, 'ids': ids, 'seqlen': seqlen, 'labels': y_batch}
     else:
-        return {'frames': x_batch, 'framesdiff': x_batchdiff, 'ids': ids, 'seqlen': seqlen}
+        return {'frames': x_batch, 'ids': ids, 'seqlen': seqlen}
     
 logger.info('Create loaders...')
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
@@ -405,12 +384,8 @@ valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 FRAMELS = pd.read_csv(os.path.join(IMGDIR, '../cropped_faces08.txt'), header=None).iloc[:,0].tolist()
 trndataset = DFakeDataset(trndf, IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
 valdataset = DFakeDataset(valdf, IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
-smldataset = DFakeDataset(valdf, IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP, small=True)
-
-
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
-smlloader = DataLoader(smldataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
 logger.info('Create model')
 poolsize=(1, 2) # , 6)
@@ -437,7 +412,6 @@ if n_gpu > 0:
     model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
 
 ypredvalls = []
-ypredvalsmls = []
 for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
@@ -463,13 +437,11 @@ for epoch in range(EPOCHS):
         model.train()  
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
-            xdiff = batch['framesdiff'].to(device, dtype=torch.float)
             y = batch['labels'].to(device, dtype=torch.float)
             x = torch.autograd.Variable(x, requires_grad=True)
-            xdiff = torch.autograd.Variable(xdiff, requires_grad=True)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)
-            out = model(x, xdiff)
+            out = model(x)
             # Get loss
             loss = criterion(out, y)
             tr_loss += loss.item()
@@ -492,34 +464,36 @@ for epoch in range(EPOCHS):
         model.load_state_dict(torch.load(model_file_name))
         model.to(device)
     if INFER in ['VAL', 'TRN']:
-        BAGS=3
-
-        logger.info('Evaluate on 88')
-        ypredval, valids, yactval = predictval(model, smlloader)
-        ypredvalsmls.append(ypredval)
-        vdf = makevaldf(yactval, ypredval)
-        vdfb = makevaldf(yactval, sum(ypredvalsmls[-BAGS:])/len(ypredvalsmls[-BAGS:])  )
-        for c in [.01] :
-            valloss = log_loss(vdf.label.values, vdf.pred.values.clip(c,1-c))
-            logger.info('Epoch {} val  88 single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
-            valloss = log_loss(vdfb.label.values, vdfb.pred.values.clip(c,1-c))
-            logger.info('Epoch {} val  88 bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalsmls[:BAGS]), c, valloss))
-
-        logger.info('Evaluate on 224')      
-        ypredval, valids, yactval = predictval(model, valloader)
+        model.eval()
+        ypredval = []
+        valids = [] 
+        with torch.no_grad():
+            for step, batch in enumerate(valloader):
+                x = batch['frames'].to(device, dtype=torch.float)
+                out = model(x)
+                out = torch.sigmoid(out)
+                ypredval.append(out.cpu().detach().numpy())
+                valids.append(batch['ids'].cpu().detach().numpy())
+                if step%200==0:
+                    logger.info('Val step {} of {}'.format(step, len(valloader)))    
+        ypredval = np.concatenate(ypredval).flatten()
+        valids = np.concatenate(valids).flatten()
         ypredvalls.append(ypredval)
-        vdf = makevaldf(yactval, ypredval)
-        vdfb = makevaldf(yactval, sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])  )
-        for c in [.01] :
-            valloss = log_loss(vdf.label.values, vdf.pred.values.clip(c,1-c))
-            logger.info('Epoch {} val 224 single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
-            valloss = log_loss(vdfb.label.values, vdfb.pred.values.clip(c,1-c))
-            logger.info('Epoch {} val 224 bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
-
+        yactval = valdataset.data.iloc[valids].label.values
+        logger.info('Actuals {}'.format(yactval[:8]))
+        logger.info('Preds {}'.format(ypredval[:8]))
+        logger.info('Ids {}'.format(valids[:8]))
+        for c in [.1, .07, .05, .03, .01, .001] :
+            valloss = log_loss(yactval, ypredval.clip(c,1-c))
+            logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
+        for c in [.1, .07, .05, .03, .01, .001] :
+            BAGS=3
+            ypredvalbag = sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])
+            valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
+            logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
         logger.info('Write out bagged prediction to preds folder')
         yvaldf = valdataset.data.iloc[valids][['video', 'label']]
         yvaldf['pred'] = ypredval 
         yvaldf.to_csv('preds/dfake_{}_sub_epoch{}_fold{}.csv.gz'.format(options.arch, epoch, FOLD), \
             index = False, compression = 'gzip')
-
         del yactval, ypredval, valids

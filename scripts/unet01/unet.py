@@ -115,7 +115,7 @@ SKIP = int(options.skip)
 SEED = int(options.seed)
 SIZE = int(options.size)
 FOLD = int(options.fold)
-BATCHSIZE = int(options.batchsize) * SKIP
+BATCHSIZE = int(options.batchsize)
 METAFILE = os.path.join(INPATH, 'data', options.metafile)
 WTSFILES = os.path.join(INPATH, options.wtspath)
 WTSPATH = os.path.join(INPATH, options.wtspath)
@@ -161,7 +161,7 @@ class DblHeadUnet(nn.Module):
         x = x.view(batch_size * seqlen, *x.size()[2:])
         logger.info(x.shape)
         # Pass each frame thru SPPNet
-        outmask, outgap = self.unet(x)#.permute(0,3,1,2))
+        outmask, outgap = self.unet(x.permute(0,3,1,2))
         # Split back out to batch
         outgap  = outgap.view(batch_size, seqlen, outgap.size()[1])
         outmask = outmask.view(batch_size, seqlen, *outmask.size()[1:])
@@ -311,7 +311,6 @@ class DFakeDataset(Dataset):
             frames = frames.resize_(d0,d1,d2,d3)
             masks = maskit(masks)
             masks = torch.tensor(np.float32(masks)).unsqueeze(1) / 255
-            
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'masks': masks, 'labels': labels}    
@@ -328,18 +327,20 @@ def collatefn(batch):
 
     maxlen = seqlen.max()    
     lossmask = torch.tensor([[1]*s+[0]*(maxlen-s) for s in seqlen]).flatten()
+
     # get shapes
-    d0,d1,d2,d3 = batch[0]['frames'].shape
-        
+    df0,df1,df2,df3 = batch[0]['frames'].shape
+    dm0,dm1,dm2,dm3 = batch[0]['masks'].shape
+
     # Pad with zero frames
     x_batch = [l['frames'] if l['frames'].shape[0] == maxlen else \
-         torch.cat((l['frames'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
+         torch.cat((l['frames'], torch.zeros((maxlen-sl,df1,df2,df3))), 0) \
          for l,sl in zip(batch, seqlen)]
-    m_batch = [l['masks'] if l['masks'].shape[0] == maxlen else \
-         torch.cat((l['masks'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
-         for l,sl in zip(batch, seqlen)]
-    
     x_batch = torch.cat([x.unsqueeze(0) for x in x_batch])
+
+    m_batch = [l['masks'] if l['masks'].shape[0] == maxlen else \
+         torch.cat((l['masks'], torch.zeros((maxlen-sl,dm1,dm2,dm3))), 0) \
+         for l,sl in zip(batch, seqlen)]
     m_batch = torch.cat([x.unsqueeze(0) for x in m_batch])
     
     if 'labels' in batch[0]:
@@ -368,9 +369,8 @@ aux_params=dict(
     activation=None,      # activation function, default is None
     classes=1,                 # define number of output labels
 )
-
 def make_model():
-    return DblHeadUnet(backbone='efficientnet-b1', dense_units = 256, dropout = 0.2, \
+    return DblHeadUnet(backbone='efficientnet-b0', dense_units = 256, dropout = 0.2, \
                     aux_params=aux_params, inpath = INPATH)
 
 model = make_model()
@@ -411,6 +411,8 @@ for epoch in range(EPOCHS):
     if INFER not in ['TST', 'EMB', 'VAL']:
 
         tr_loss = 0.
+        tr_losscls = 0.
+        tr_lossmsk = 0.
         for param in model.parameters():
             param.requires_grad = True
         model.train()  
@@ -429,7 +431,7 @@ for epoch in range(EPOCHS):
             # Get loss for frame segmentation
             mskidx = msk.view(-1)==1
             m = m.view(-1,  *m.size()[2:])[mskidx]
-            outmask = outmask.view(-1, outmask.size()[2:])[mskidx]
+            outmask = outmask.view(-1, *outmask.size()[2:])[mskidx]
             lossmsk = criterionmask(outmask, m)
             # Get loss
             loss = 0.5 * losscls + 0.5 * lossmsk

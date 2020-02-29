@@ -1,0 +1,11 @@
+FROM nvcr.io/nvidia/pytorch:19.09-py3
+
+RUN pip install albumentations==0.4.3
+RUN pip install scikit-video
+RUN pip install dlib
+RUN pip install filterpy
+RUN pip install facenet-pytorch
+RUN pip install torch-mtcnn
+RUN pip install pretrainedmodels==0.7.4
+RUN pip install imutils
+RUN pip install torch==1.1.0

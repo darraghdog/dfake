@@ -20,6 +20,20 @@ from collections import defaultdict
 from itertools import chain
 import cv2
 
+def makegray(mapmat, scale = 3):
+    outmat = (abs(mapmat.mean(-1) - 128) * 2 )
+    outmat[outmat < 4] = 0
+    outmat[outmat > 251] = 0
+    outmat = outmat * scale
+    outmat = outmat.clip(0,255)
+    return np.uint8(outmat )
+
+def maskit(bmasks, ksize =2, its=2, scale = 8):
+    bmasks = makegray(bmasks, scale)
+    kernel = np.ones((ksize, ksize), np.uint8)
+    bmasks = np.stack([ cv2.erode(b, kernel, iterations = its) for b in bmasks  ])
+    bmasks = np.stack([ cv2.dilate(b, kernel, iterations = its) for b in bmasks  ])
+    return bmasks
 
 def seqlentomask(length, max_len=None, dtype=None):
     """length: B.

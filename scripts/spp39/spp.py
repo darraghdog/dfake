@@ -365,8 +365,8 @@ trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 FRAMELS = pd.read_csv(os.path.join(IMGDIR, '../cropped_faces08.txt'), header=None).iloc[:,0].tolist()
-trndataset = DFakeDataset(trndf.head(300), IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
-valdataset = DFakeDataset(valdf.head(300), IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
+trndataset = DFakeDataset(trndf, IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
+valdataset = DFakeDataset(valdf, IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
@@ -466,10 +466,8 @@ for epoch in range(EPOCHS):
         logger.info('Aggregate validation')
         yvaldf = valdataset.data.iloc[valids][['label', 'video']].copy()
         yvaldf['pred'] = ypredval
-        yvaldf = metadf[['label', 'video', 'pred']].copy()
-        yvaldf.label = (valdf.label.values=='FAKE').astype(np.int8)
-        yvaldf = valdf.groupby(['video'], as_index=False)[['label', 'pred']].mean()
-        yvaldf = valdf.sort_values('video').reset_index(drop=True)
+        yvaldf = yvaldf.groupby(['video'], as_index=False)[['label', 'pred']].mean()
+        yvaldf = yvaldf.sort_values('video').reset_index(drop=True)
         
         ypredval = yvaldf.pred.values
         yactval = yvaldf.label.values

@@ -82,7 +82,7 @@ parser.add_option('-p', '--start', action="store", dest="start", help="Start epo
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
 parser.add_option('-s', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
-parser.add_option('-t', '--arch', action="store", dest="arch", help="Architecture", default="mixnet_l")
+parser.add_option('-t', '--arch', action="store", dest="arch", help="Architecture", default='efficientnet-b0')
 parser.add_option('-u', '--stop', action="store", dest="stop", help="Start epochs", default="13")
 
 
@@ -159,7 +159,6 @@ class DblHeadUnet(nn.Module):
         batch_size, seqlen = x.size()[:2]
         # Flatten to make a single long list of frames
         x = x.view(batch_size * seqlen, *x.size()[2:])
-        logger.info(x.shape)
         # Pass each frame thru SPPNet
         outmask, outgap = self.unet(x.permute(0,3,1,2))
         # Split back out to batch
@@ -370,7 +369,7 @@ aux_params=dict(
     classes=1,                 # define number of output labels
 )
 def make_model():
-    return DblHeadUnet(backbone='efficientnet-b0', dense_units = 256, dropout = 0.2, \
+    return DblHeadUnet(backbone=options.arch, dense_units = 256, dropout = 0.2, \
                     aux_params=aux_params, inpath = INPATH)
 
 model = make_model()
@@ -385,6 +384,7 @@ optimizer = optim.Adam(plist, lr=LR)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
+criterionmask = torch.nn.L1Loss()
 criterionmask = torch.nn.MSELoss()
 
 
@@ -409,12 +409,13 @@ for epoch in range(EPOCHS):
         scheduler.step()
         continue
     if INFER not in ['TST', 'EMB', 'VAL']:
-
         tr_loss = 0.
         tr_losscls = 0.
         tr_lossmsk = 0.
         for param in model.parameters():
             param.requires_grad = True
+        for param in model.module.unet.encoder.parameters():
+            param.requires_grad = False if epoch <1 else True
         model.train()  
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
@@ -443,12 +444,7 @@ for epoch in range(EPOCHS):
             if step % ACCUM == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-                '''
             if step%100==0:
-                logger.info('Trn step {} of {} trn lossavg {:.5f}'. \
-                        format(step, len(trnloader), (tr_loss/(1+step))))
-                '''
-            if step%10==0:
                 logger.info('Trn step {} of {} trn lossavg {:.5f} losscls {:.5f} lossmsk {:.5f}'. \
                         format(step, len(trnloader), (tr_loss/(1+step)), \
                                (tr_losscls/(1+step)), (tr_lossmsk/(1+step)) ))

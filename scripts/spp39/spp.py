@@ -115,9 +115,27 @@ DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
 
+# IMGDIR = '/Users/dhanley2/Documents/Personal/dfake/data/npimg08'
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
+
+trackdf = pd.concat([pd.read_csv(f) for f in glob.glob(IMGDIR+'/track*')], 0)
+trackdf = trackdf[['video', 'obj', 'frame']]
+trackgrp = trackdf.groupby(['video', 'obj'], as_index=False).count()
+trackgrp = trackgrp.sort_values(['video', 'frame'], ascending = False)
+trackgrp['rank'] = trackgrp.groupby(['video']).cumcount()
+trackgrp = trackgrp.sort_index()
+# Exclude the following
+trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('frame<16 & rank >0').index)]
+trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('frame<32 & rank >1').index)]
+trackgrp = trackgrp[['video', 'obj']].reset_index(drop=True)
+
+# Join to metadf
+metadf = pd.merge(metadf, trackgrp)
+trackdf = pd.merge(trackdf, trackgrp)
+trackdf = trackdf.groupby(['video', 'obj'])['frame'].apply(list)
+trackdf.loc['aaagqkcdis.mp4'].loc[0]
 
 
 n_gpu = torch.cuda.device_count()
@@ -245,11 +263,11 @@ transform_norm = Compose([
     ])
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP):
+    def __init__(self, df, imgdir, framels, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = os.listdir(imgdir)
+        self.framels = framels # os.listdir(imgdir)
         self.labels = labels
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
@@ -263,6 +281,7 @@ class DFakeDataset(Dataset):
         self.val = val
         self.norm = transform_norm
         self.transform = trn_transforms if not val else val_transforms
+        self.track = trackdf
   
     def __len__(self):
         return len(self.data)
@@ -273,10 +292,19 @@ class DFakeDataset(Dataset):
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
             frames = np.load(fname)['arr_0']
+            # Index object 
+            logger.info(f'{vid.video} shape before : {frames.shape}')
+            fidx = self.track.loc[vid.video].loc[vid.obj]
+            logger.info(f'{vid.video} index : {fidx}')
+            frames = frames[fidx]
+            logger.info(f'{vid.video} shape after : {frames.shape}')
             # shp1 = frames.shape
             if (SKIP>1) and (frames.shape[0] > SKIP*6):
                 every_k = random.randint(0,SKIP-1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
+            elif (SKIP>1) and (frames.shape[0] > (SKIP//2)*6):
+                every_k = random.randint(0,(SKIP//2)-1)
+                frames = np.stack([b for t,b in enumerate(frames) if t%(SKIP//2)==every_k])
             # shp2 = frames.shape
             # logger.info(f'{shp1} {shp2}')
             # Cut the frames to max 37 with a sliding window
@@ -335,8 +363,9 @@ logger.info('Create loaders...')
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
-trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 48 // SKIP)
-valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 48 // SKIP)
+FRAMELS = pd.read_csv(os.path.join(IMGDIR, '../cropped_faces08.txt'), header=None).iloc[:,0].tolist()
+trndataset = DFakeDataset(trndf, IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
+valdataset = DFakeDataset(valdf, IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 

@@ -119,23 +119,24 @@ ACCUM=int(options.accum)
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
-
 trackdf = pd.concat([pd.read_csv(f) for f in glob.glob(IMGDIR+'/track*')], 0)
-trackdf = trackdf[['video', 'obj', 'frame']]
+trackdf = trackdf.sort_values(['video', 'frame']).reset_index(drop = True)
+trackdf['seq'] = trackdf.groupby(['video']).cumcount()
+trackdf = trackdf[['video', 'obj', 'seq']]
+
 trackgrp = trackdf.groupby(['video', 'obj'], as_index=False).count()
-trackgrp = trackgrp.sort_values(['video', 'frame'], ascending = False)
+trackgrp = trackgrp.sort_values(['video', 'seq'], ascending = False)
 trackgrp['rank'] = trackgrp.groupby(['video']).cumcount()
 trackgrp = trackgrp.sort_index()
 # Exclude the following
-trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('frame<16 & rank >0').index)]
-trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('frame<32 & rank >1').index)]
+trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('seq<16 & rank >0').index)]
+trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('seq<32 & rank >1').index)]
 trackgrp = trackgrp[['video', 'obj']].reset_index(drop=True)
 
 # Join to metadf
 metadf = pd.merge(metadf, trackgrp)
-trackdf = pd.merge(trackdf, trackgrp)
-trackdf = trackdf.groupby(['video', 'obj'])['frame'].apply(list)
-trackdf.loc['aaagqkcdis.mp4'].loc[0]
+trackdf = pd.merge(trackgrp, trackdf, how = 'left')
+trackdf = trackdf.groupby(['video', 'obj'])['seq'].apply(list)
 
 
 n_gpu = torch.cuda.device_count()
@@ -293,11 +294,11 @@ class DFakeDataset(Dataset):
         try:
             frames = np.load(fname)['arr_0']
             # Index object 
-            logger.info(f'{vid.video} shape before : {frames.shape}')
+            #logger.info(f'{vid.video} shape before : {frames.shape}')
             fidx = self.track.loc[vid.video].loc[vid.obj]
-            logger.info(f'{vid.video} index : {fidx}')
+            #logger.info(f'{vid.video} index : {fidx}')
             frames = frames[fidx]
-            logger.info(f'{vid.video} shape after : {frames.shape}')
+            #logger.info(f'{vid.video} shape after : {frames.shape}')
             # shp1 = frames.shape
             if (SKIP>1) and (frames.shape[0] > SKIP*6):
                 every_k = random.randint(0,SKIP-1)
@@ -364,8 +365,8 @@ trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 FRAMELS = pd.read_csv(os.path.join(IMGDIR, '../cropped_faces08.txt'), header=None).iloc[:,0].tolist()
-trndataset = DFakeDataset(trndf, IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
-valdataset = DFakeDataset(valdf, IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
+trndataset = DFakeDataset(trndf.head(300), IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
+valdataset = DFakeDataset(valdf.head(300), IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
@@ -458,13 +459,24 @@ for epoch in range(EPOCHS):
                 valids.append(batch['ids'].cpu().detach().numpy())
                 if step%200==0:
                     logger.info('Val step {} of {}'.format(step, len(valloader)))    
+        # Extract prediction & ids
         ypredval = np.concatenate(ypredval).flatten()
         valids = np.concatenate(valids).flatten()
+        
+        logger.info('Aggregate validation')
+        yvaldf = valdataset.data.iloc[valids][['label', 'video']].copy()
+        yvaldf['pred'] = ypredval
+        yvaldf = metadf[['label', 'video', 'pred']].copy()
+        yvaldf.label = (valdf.label.values=='FAKE').astype(np.int8)
+        yvaldf = valdf.groupby(['video'], as_index=False)[['label', 'pred']].mean()
+        yvaldf = valdf.sort_values('video').reset_index(drop=True)
+        
+        ypredval = yvaldf.pred.values
+        yactval = yvaldf.label.values
         ypredvalls.append(ypredval)
-        yactval = valdataset.data.iloc[valids].label.values
+        
         logger.info('Actuals {}'.format(yactval[:8]))
         logger.info('Preds {}'.format(ypredval[:8]))
-        logger.info('Ids {}'.format(valids[:8]))
         for c in [.1, .07, .05, .03, .01, .001] :
             valloss = log_loss(yactval, ypredval.clip(c,1-c))
             logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
@@ -474,8 +486,8 @@ for epoch in range(EPOCHS):
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
         logger.info('Write out bagged prediction to preds folder')
-        yvaldf = valdataset.data.iloc[valids][['video', 'label']]
-        yvaldf['pred'] = ypredval 
+        #yvaldf = valdataset.data.iloc[valids][['video', 'label']]
+        #yvaldf['pred'] = ypredval 
         yvaldf.to_csv('preds/dfake_{}_sub_epoch{}_fold{}.csv.gz'.format(options.arch, epoch, FOLD), \
             index = False, compression = 'gzip')
         del yactval, ypredval, valids

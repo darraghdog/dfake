@@ -20,9 +20,11 @@ import optparse
 import itertools
 #from facenet_pytorch import MTCNN, InceptionResnetV1
 import matplotlib.pylab as plt
+import itertools
 import warnings
 warnings.filterwarnings("ignore")
-sys.path.append('/share/dhanley2/dfake/scripts/opt/conda/lib/python3.6/site-packages')
+# sys.path.append('/share/dhanley2/dfake/scripts/opt/conda/lib/python3.6/site-packages')
+# sys.path.append('/share/dhanley2/dfake/scripts/pim')
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -33,8 +35,6 @@ from torch.utils.data import Dataset
 from sklearn.metrics import log_loss
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
-import timm
-
 from albumentations import (Cutout, Compose, Normalize, RandomRotate90, HorizontalFlip, RandomBrightnessContrast, 
                            VerticalFlip, ShiftScaleRotate, Transpose, OneOf, IAAAdditiveGaussianNoise,
                            GaussNoise, RandomGamma, RandomContrast, RandomBrightness, HueSaturationValue,
@@ -73,6 +73,9 @@ parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulat
 parser.add_option('-s', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
 parser.add_option('-t', '--arch', action="store", dest="arch", help="Architecture", default="mixnet_l")
 parser.add_option('-u', '--stop', action="store", dest="stop", help="Start epochs", default="13")
+parser.add_option('-v', '--fakesamp', action="store", dest="fakesamp", help="Mix in ratio of fake samples", default="0")
+parser.add_option('-w', '--origsamp', action="store", dest="origsamp", help="Max mix in ratio of original", default="0")
+parser.add_option('-x', '--realsamp', action="store", dest="realsamp", help="Max mix in ratio of other reals", default="0")
 
 
 options, args = parser.parse_args()
@@ -80,10 +83,14 @@ INPATH = options.rootpath
 
 #INPATH='/Users/dhanley2/Documents/Personal/dfake'
 sys.path.append(os.path.join(INPATH, 'utils' ))
+print(os.path.join(INPATH, 'utils' ))
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
 from sort import *
 from sppnet import SPPNet
+import timm
+from splits import  load_folds, get_real_to_fake_dict_v2, get_cluster_data
+
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -114,8 +121,11 @@ LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
+ORIGSAMP=int(options.origsamp)
+FAKESAMP=int(options.fakesamp)
+REALSAMP=int(options.realsamp)
 
-# IMGDIR = '/Users/dhanley2/Documents/Personal/dfake/data/npimg08'
+
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
@@ -139,12 +149,21 @@ trackdf = pd.merge(trackgrp, trackdf, how = 'left')
 trackdf = trackdf.groupby(['video', 'obj'])['seq'].apply(list)
 
 
+
+
+
 n_gpu = torch.cuda.device_count()
 logger.info('Cuda n_gpus : {}'.format(n_gpu ))
 
-#os.environ['TORCH_HOME'] = WTSFILES
-#m = timm.create_model('mixnet_l', pretrained=True)
+METADATA_PATH=os.path.join(INPATH, 'data/splits')
+REAL_VIDEO_TO_CLUSTER, FAKE_VIDEO_TO_CLUSTER, CLUSTER_TO_REAL_VIDEOS, \
+            CLUSTER_TO_FAKE_VIDEOS, CLUSTER_TO_DESCRIPTOR = \
+            get_cluster_data(METADATA_PATH)
 
+ACTORS = [[i+'.mp4' for i in m] for m in CLUSTER_TO_REAL_VIDEOS.values()]
+REALVIDSAMEACTOR = dict(itertools.chain(*[[(im, m) for im in  m] \
+                                           for m in ACTORS]))
+random.sample(REALVIDSAMEACTOR['eopcdsfkzm.mp4'], 3)
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
@@ -205,8 +224,10 @@ def snglaugfn():
         Resize(SIZE, SIZE, interpolation=1,  p=1),
         ])
 
-mean_img = [0.4258249 , 0.31385377, 0.29170314]
-std_img = [0.22613944, 0.1965406 , 0.18660679]
+#mean_img = [0.4258249 , 0.31385377, 0.29170314]
+#std_img = [0.22613944, 0.1965406 , 0.18660679]
+mean_img = [0.485, 0.456, 0.406]
+std_img = [0.229, 0.224, 0.225]
 
 p1 = 0.1
 trn_transforms = A.Compose([
@@ -239,17 +260,6 @@ trn_transforms = A.Compose([
              A.ImageCompression(quality_lower=60, quality_upper=100, always_apply=False, p=p1),
              A.NoOp(p=p1*6),
             ]),
-        #A.OneOf([
-        #     A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, drop_color=(200, 200, 200), p=p1),
-        #     A.RandomShadow( p=p1),
-        #     A.NoOp(p=p1*12),
-        #    ]),
-        #A.OneOf([
-        #    A.CoarseDropout(max_holes=50, max_height=20, max_width=20, min_height=6, min_width=6, p=p1),
-        #    A.Cutout(num_holes=12, max_h_size=24, max_w_size=24, fill_value=255, p=p1),
-        #    A.CLAHE(clip_limit=2.0, p=p1),
-        #    A.NoOp(p=p1*12),
-        #    ]),
     ])
 
 val_transforms = Compose([
@@ -286,28 +296,22 @@ class DFakeDataset(Dataset):
   
     def __len__(self):
         return len(self.data)
-    
+
     def __getitem__(self, idx):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
         try:
-            frames = np.load(fname)['arr_0']
-            # Index object 
-            #logger.info(f'{vid.video} shape before : {frames.shape}')
             fidx = self.track.loc[vid.video].loc[vid.obj]
-            #logger.info(f'{vid.video} index : {fidx}')
-            frames = frames[fidx]
-            #logger.info(f'{vid.video} shape after : {frames.shape}')
-            # shp1 = frames.shape
+            frames = np.load(fname)['arr_0'][fidx]
             if (SKIP>1) and (frames.shape[0] > SKIP*6):
                 every_k = random.randint(0,SKIP-1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
             elif (SKIP>1) and (frames.shape[0] > (SKIP//2)*6):
                 every_k = random.randint(0,(SKIP//2)-1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%(SKIP//2)==every_k])
-            # shp2 = frames.shape
-            # logger.info(f'{shp1} {shp2}')
+
+            # if it is a FAKE label in trainnig, 60% apply mixing of augmentations
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
@@ -459,6 +463,7 @@ for epoch in range(EPOCHS):
                 valids.append(batch['ids'].cpu().detach().numpy())
                 if step%200==0:
                     logger.info('Val step {} of {}'.format(step, len(valloader)))    
+
         # Extract prediction & ids
         ypredval = np.concatenate(ypredval).flatten()
         valids = np.concatenate(valids).flatten()
@@ -489,3 +494,5 @@ for epoch in range(EPOCHS):
         yvaldf.to_csv('preds/dfake_{}_sub_epoch{}_fold{}.csv.gz'.format(options.arch, epoch, FOLD), \
             index = False, compression = 'gzip')
         del yactval, ypredval, valids
+
+

@@ -35,6 +35,17 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
 import timm
 
+
+from typing import Optional, Union, List
+from segmentation_models_pytorch.unet.decoder import UnetDecoder
+from segmentation_models_pytorch.encoders import get_encoder
+from segmentation_models_pytorch.base import SegmentationModel
+from segmentation_models_pytorch.base import SegmentationHead, ClassificationHead
+import torch.nn as nn
+import torch.nn.functional as F
+from segmentation_models_pytorch.encoders import encoders
+import torch.utils.model_zoo as model_zoo
+
 from albumentations import (Cutout, Compose, Normalize, RandomRotate90, HorizontalFlip, RandomBrightnessContrast, 
                            VerticalFlip, ShiftScaleRotate, Transpose, OneOf, IAAAdditiveGaussianNoise,
                            GaussNoise, RandomGamma, RandomContrast, RandomBrightness, HueSaturationValue,
@@ -71,7 +82,7 @@ parser.add_option('-p', '--start', action="store", dest="start", help="Start epo
 parser.add_option('-q', '--infer', action="store", dest="infer", help="root directory", default="TRN")
 parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulation steps", default="1")
 parser.add_option('-s', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
-parser.add_option('-t', '--arch', action="store", dest="arch", help="Architecture", default="mixnet_l")
+parser.add_option('-t', '--arch', action="store", dest="arch", help="Architecture", default='efficientnet-b0')
 parser.add_option('-u', '--stop', action="store", dest="stop", help="Start epochs", default="13")
 
 
@@ -82,8 +93,10 @@ INPATH = options.rootpath
 sys.path.append(os.path.join(INPATH, 'utils' ))
 from logs import get_logger
 from utils import dumpobj, loadobj, chunks, pilimg, SpatialDropout
+from utils import makegray, maskit
 from sort import *
 from sppnet import SPPNet
+import segnet
 
 # Print info about environments
 logger = get_logger('Video to image :', 'INFO') 
@@ -102,7 +115,7 @@ SKIP = int(options.skip)
 SEED = int(options.seed)
 SIZE = int(options.size)
 FOLD = int(options.fold)
-BATCHSIZE = int(options.batchsize) * SKIP
+BATCHSIZE = int(options.batchsize)
 METAFILE = os.path.join(INPATH, 'data', options.metafile)
 WTSFILES = os.path.join(INPATH, options.wtspath)
 WTSPATH = os.path.join(INPATH, options.wtspath)
@@ -115,47 +128,28 @@ DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
 
-# IMGDIR = '/Users/dhanley2/Documents/Personal/dfake/data/npimg08'
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
-trackdf = pd.concat([pd.read_csv(f) for f in glob.glob(IMGDIR+'/track*')], 0)
-trackdf = trackdf.sort_values(['video', 'frame']).reset_index(drop = True)
-trackdf['seq'] = trackdf.groupby(['video']).cumcount()
-trackdf = trackdf[['video', 'obj', 'seq']]
-
-trackgrp = trackdf.groupby(['video', 'obj'], as_index=False).count()
-trackgrp = trackgrp.sort_values(['video', 'seq'], ascending = False)
-trackgrp['rank'] = trackgrp.groupby(['video']).cumcount()
-trackgrp = trackgrp.sort_index()
-# Exclude the following
-trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('seq<16 & rank >0').index)]
-trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('seq<32 & rank >1').index)]
-trackgrp = trackgrp[['video', 'obj']].reset_index(drop=True)
-
-# Join to metadf
-metadf = pd.merge(metadf, trackgrp)
-trackdf = pd.merge(trackgrp, trackdf, how = 'left')
-trackdf = trackdf.groupby(['video', 'obj'])['seq'].apply(list)
 
 
 n_gpu = torch.cuda.device_count()
 logger.info('Cuda n_gpus : {}'.format(n_gpu ))
 
 #os.environ['TORCH_HOME'] = WTSFILES
-#m = timm.create_model('mixnet_l', pretrained=True)
 
 
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
-class SPPSeqNet(nn.Module):
-    def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
-                 architecture = 'resnet', dense_units = 256, dropout = 0.2):
+class DblHeadUnet(nn.Module):
+    def __init__(self, backbone, aux_params, inpath, pretrained=True, dense_units = 256, 
+                 dropout = 0.5):
         # Only resnet is supported in this version
-        super(SPPSeqNet, self).__init__()
-        logger.info('{} {} {}'.format(architecture, backbone, WTSPATH))
-        self.sppnet = SPPNet(architecture=architecture, backbone=backbone, pool_size=pool_size, folder=WTSPATH)
+        super(DblHeadUnet, self).__init__()
+        self.unet = segnet.Unet(backbone, encoder_weights='imagenet', classes=1, 
+                                aux_params=aux_params, inpath = inpath)
         self.dense_units = dense_units
-        self.lstm1 = nn.LSTM(embed_size, self.dense_units, bidirectional=True, batch_first=True)
+        self.in_channels = self.unet.encoder._conv_head.in_channels
+        self.lstm1 = nn.LSTM(self.in_channels, self.dense_units, bidirectional=True, batch_first=True)
         self.linear1 = nn.Linear(self.dense_units*2, self.dense_units*2)
         self.linear_out = nn.Linear(self.dense_units*2, 1)
         self.embedding_dropout = SpatialDropout(dropout)
@@ -166,22 +160,26 @@ class SPPSeqNet(nn.Module):
         # Flatten to make a single long list of frames
         x = x.view(batch_size * seqlen, *x.size()[2:])
         # Pass each frame thru SPPNet
-        emb = self.sppnet(x.permute(0,3,1,2))
+        outmask, outgap = self.unet(x.permute(0,3,1,2))
         # Split back out to batch
-        emb = emb.view(batch_size, seqlen, emb.size()[1])
-        emb = self.embedding_dropout(emb)
+        outgap  = outgap.view(batch_size, seqlen, outgap.size()[1])
+        outmask = outmask.view(batch_size, seqlen, *outmask.size()[1:])
+        outgap = self.embedding_dropout(outgap)
         
         # Pass batch thru sequential model(s)
-        h_lstm1, _ = self.lstm1(emb)
+        h_lstm1, _ = self.lstm1(outgap)
         max_pool, _ = torch.max(h_lstm1, 1)
         h_pool_linear = F.relu(self.linear1(max_pool))
         
         # Max pool and linear layer
         hidden = max_pool + h_pool_linear
-        
         # Classifier
         out = self.linear_out(hidden)
-        return out
+        
+        # Squeeze outmask
+        outmask = outmask.squeeze(2)
+        
+        return out, outmask
 
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
 # https://www.kaggle.com/alexanderliao/image-augmentation-demo-with-albumentation/notebook
@@ -195,22 +193,25 @@ In this dataset, no video was subjected to more than one augmentation.
 '''
 
 def snglaugfn():
-    rot = random.randrange(-10, 10)
+    #rot = random.randrange(-10, 10)
     dim1 = random.uniform(0.7, 1.0)
     dim2 = random.randrange(int(SIZE)*0.75, SIZE)
+    hflp = random.randrange(0.0,2)
     return Compose([
-        ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
-        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=0.5), 
-        Resize(dim2, dim2, interpolation=1,  p=0.5),
-        Resize(SIZE, SIZE, interpolation=1,  p=1),
+        A.HorizontalFlip(p=hflp),
+        #ShiftScaleRotate(p=0.5, rotate_limit=(rot,rot)),
+        CenterCrop(int(SIZE*dim1), int(SIZE*dim1), always_apply=False, p=1.0), 
+        Resize(dim2, dim2, interpolation=1,  p=1.0),
+        Resize(SIZE, SIZE, interpolation=1,  p=1.0),
         ])
 
-mean_img = [0.4258249 , 0.31385377, 0.29170314]
-std_img = [0.22613944, 0.1965406 , 0.18660679]
+#mean_img = [0.4258249 , 0.31385377, 0.29170314]
+#std_img = [0.22613944, 0.1965406 , 0.18660679]
+mean_img = [0.485, 0.456, 0.406]
+std_img = [0.229, 0.224, 0.225]
 
 p1 = 0.1
 trn_transforms = A.Compose([
-        A.HorizontalFlip(p=0.5),
         A.OneOf([
             A.Downscale(scale_min=0.5, scale_max=0.9, interpolation=0, always_apply=False, p=p1),
             A.NoOp(p=p1*2),
@@ -239,36 +240,23 @@ trn_transforms = A.Compose([
              A.ImageCompression(quality_lower=60, quality_upper=100, always_apply=False, p=p1),
              A.NoOp(p=p1*6),
             ]),
-        #A.OneOf([
-        #     A.RandomRain(slant_lower=-10, slant_upper=10, drop_length=20, drop_width=1, drop_color=(200, 200, 200), p=p1),
-        #     A.RandomShadow( p=p1),
-        #     A.NoOp(p=p1*12),
-        #    ]),
-        #A.OneOf([
-        #    A.CoarseDropout(max_holes=50, max_height=20, max_width=20, min_height=6, min_width=6, p=p1),
-        #    A.Cutout(num_holes=12, max_h_size=24, max_w_size=24, fill_value=255, p=p1),
-        #    A.CLAHE(clip_limit=2.0, p=p1),
-        #    A.NoOp(p=p1*12),
-        #    ]),
     ])
 
 val_transforms = Compose([
     NoOp(),
-    #JpegCompression(quality_lower=50, quality_upper=50, p=1.0),
     ])
 
 transform_norm = Compose([
-    #JpegCompression(quality_lower=75, quality_upper=75, p=1.0),
     Normalize(mean=mean_img, std=std_img, max_pixel_value=255.0, p=1.0),
     ToTensor()
     ])
     
 class DFakeDataset(Dataset):
-    def __init__(self, df, imgdir, framels, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP):
+    def __init__(self, df, imgdir, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
         self.imgdir = imgdir
-        self.framels = framels # os.listdir(imgdir)
+        self.framels = os.listdir(imgdir)
         self.labels = labels
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
@@ -282,7 +270,6 @@ class DFakeDataset(Dataset):
         self.val = val
         self.norm = transform_norm
         self.transform = trn_transforms if not val else val_transforms
-        self.track = trackdf
   
     def __len__(self):
         return len(self.data)
@@ -291,48 +278,44 @@ class DFakeDataset(Dataset):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
+        mname = os.path.join(self.imgdir, 'map__' + vid.video.replace('mp4', 'npz'))
         try:
             frames = np.load(fname)['arr_0']
-            # Index object 
-            #logger.info(f'{vid.video} shape before : {frames.shape}')
-            fidx = self.track.loc[vid.video].loc[vid.obj]
-            #logger.info(f'{vid.video} index : {fidx}')
-            frames = frames[fidx]
-            #logger.info(f'{vid.video} shape after : {frames.shape}')
+            masks = np.load(mname)['arr_0']
             # shp1 = frames.shape
             if (SKIP>1) and (frames.shape[0] > SKIP*6):
                 every_k = random.randint(0,SKIP-1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
-            elif (SKIP>1) and (frames.shape[0] > (SKIP//2)*6):
-                every_k = random.randint(0,(SKIP//2)-1)
-                frames = np.stack([b for t,b in enumerate(frames) if t%(SKIP//2)==every_k])
-            # shp2 = frames.shape
-            # logger.info(f'{shp1} {shp2}')
+                masks  = np.stack([b for t,b in enumerate(masks) if t%SKIP==every_k])
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
                 xtra = frames.shape[0]-self.maxlen
                 shift = random.randint(0, xtra)
                 frames = frames[xtra-shift:xtra-shift+self.maxlen]
+                masks  = masks[xtra-shift:xtra-shift+self.maxlen]
             else:
                 frames = frames[:self.maxlen]
+                masks = masks[:self.maxlen]
             d0,d1,d2,d3 = frames.shape
-            augsngl = self.snglaug
             # Standard augmentation on each image
             augfn = self.snglaug()
-            if self.train : frames = np.stack([augfn(image=f)['image'] for f in frames])
+            if self.train : 
+                frames = np.stack([augfn(image=f)['image'] for f in frames])
+                masks = np.stack([augfn(image=f)['image'] for f in masks])
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:
-                augmented = self.transform(image=frames)
-                frames = augmented['image']               
-            augmented = self.norm(image=frames)
-            frames = augmented['image']
+                frames = self.transform(image=frames)['image'] 
+            frames = self.norm(image=frames)['image']
             frames = frames.resize_(d0,d1,d2,d3)
+            # masks = maskit(masks)
+            masks = makegray(masks)
+            masks = torch.tensor(np.float32(masks)).unsqueeze(1) / 255
             if self.train:
                 labels = torch.tensor(vid.label)
-                return {'frames': frames, 'idx': idx, 'labels': labels}    
+                return {'frames': frames, 'idx': idx, 'masks': masks, 'labels': labels}    
             else:      
-                return {'frames': frames, 'idx': idx}
+                return {'frames': frames, 'idx': idx, 'masks': masks}
         except Exception:
             logger.exception('Failed to load numpy array {}'.format(fname))
                
@@ -343,20 +326,30 @@ def collatefn(batch):
     ids = torch.tensor([l['idx'] for l in batch])
 
     maxlen = seqlen.max()    
+    lossmask = torch.tensor([[1]*s+[0]*(maxlen-s) for s in seqlen]).flatten()
+
     # get shapes
-    d0,d1,d2,d3 = batch[0]['frames'].shape
-        
+    df0,df1,df2,df3 = batch[0]['frames'].shape
+    dm0,dm1,dm2,dm3 = batch[0]['masks'].shape
+
     # Pad with zero frames
     x_batch = [l['frames'] if l['frames'].shape[0] == maxlen else \
-         torch.cat((l['frames'], torch.zeros((maxlen-sl,d1,d2,d3))), 0) 
+         torch.cat((l['frames'], torch.zeros((maxlen-sl,df1,df2,df3))), 0) \
          for l,sl in zip(batch, seqlen)]
     x_batch = torch.cat([x.unsqueeze(0) for x in x_batch])
+
+    m_batch = [l['masks'] if l['masks'].shape[0] == maxlen else \
+         torch.cat((l['masks'], torch.zeros((maxlen-sl,dm1,dm2,dm3))), 0) \
+         for l,sl in zip(batch, seqlen)]
+    m_batch = torch.cat([x.unsqueeze(0) for x in m_batch])
     
     if 'labels' in batch[0]:
         y_batch = torch.tensor([l['labels'] for l in batch])
-        return {'frames': x_batch, 'ids': ids, 'seqlen': seqlen, 'labels': y_batch}
+        return {'frames': x_batch, 'masks': m_batch, 'ids': ids, 'seqlen': seqlen, \
+                'lossmask': lossmask,  'labels': y_batch}
     else:
-        return {'frames': x_batch, 'ids': ids, 'seqlen': seqlen}
+        return {'frames': x_batch, 'masks': m_batch, 'ids': ids, 'seqlen': seqlen, \
+                'lossmask': lossmask}
     
 logger.info('Create loaders...')
 # IMGDIR='/Users/dhanley2/Documents/Personal/dfake/data/npimg'
@@ -364,19 +357,23 @@ logger.info('Create loaders...')
 trndf = metadf.query('fold != @FOLD').reset_index(drop=True)
 valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
-FRAMELS = pd.read_csv(os.path.join(IMGDIR, '../cropped_faces08.txt'), header=None).iloc[:,0].tolist()
-trndataset = DFakeDataset(trndf, IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
-valdataset = DFakeDataset(valdf, IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
+trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 48 // SKIP)
+valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 48 // SKIP)
 trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
 valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
 
 logger.info('Create model')
-poolsize=(1, 2) # , 6)
-embedsize = 512*sum(i**2 for i in poolsize)
-# embedsize = 384*sum(i**2 for i in poolsize)
+aux_params=dict(
+    pooling='avg',             # one of 'avg', 'max'
+    dropout=0.5,               # dropout ratio, default is None
+    activation=None,      # activation function, default is None
+    classes=1,                 # define number of output labels
+)
+def make_model():
+    return DblHeadUnet(backbone=options.arch, dense_units = 256, dropout = 0.2, \
+                    aux_params=aux_params, inpath = INPATH)
 
-model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  architecture = options.arch, dropout = 0.2, embed_size = embedsize)
+model = make_model()
 model = model.to(device)
 param_optimizer = list(model.named_parameters())
 no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -385,11 +382,12 @@ plist = [
     {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 optimizer = optim.Adam(plist, lr=LR)
-# scheduler = StepLR(optimizer, 1, gamma=LRGAMMA, last_epoch=-1)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
-
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
+criterionmask = torch.nn.L1Loss()
+#criterionmask = torch.nn.MSELoss()
+
 
 if n_gpu > 0:
     model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
@@ -404,8 +402,7 @@ for epoch in range(EPOCHS):
         continue
     if epoch<START:
         if epoch == (START - 1):
-            model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  architecture = options.arch, dropout = 0.2, embed_size = embedsize)
+            model = make_model()
             if n_gpu > 0:
                 model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
             model.load_state_dict(torch.load(model_file_name))
@@ -413,35 +410,55 @@ for epoch in range(EPOCHS):
         scheduler.step()
         continue
     if INFER not in ['TST', 'EMB', 'VAL']:
-
         tr_loss = 0.
+        tr_losscls = 0.
+        tr_lossmsk = 0.
         for param in model.parameters():
             param.requires_grad = True
+        for param in model.module.unet.encoder.parameters():
+            param.requires_grad = False if epoch <1 else True
         model.train()  
         for step, batch in enumerate(trnloader):
             x = batch['frames'].to(device, dtype=torch.float)
+            msk = batch['lossmask'].to(device, dtype=torch.int)
+            m = batch['masks'].to(device, dtype=torch.float)
+            
             y = batch['labels'].to(device, dtype=torch.float)
             x = torch.autograd.Variable(x, requires_grad=True)
+            m = torch.autograd.Variable(m)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)
-            out = model(x)
+            out, outmask = model(x)
+            # Get loss for video classes
+            losscls = criterion(out, y)
+            # Get loss for frame segmentation
+            #logger.info(f'Mask mean : {m.mean()}')
+            #logger.info(f'Mask std : {m.std()}')
+            mskidx = msk.view(-1)==1
+            m = m.view(-1,  *m.size()[2:])[mskidx]
+            outmask = outmask.view(-1, *outmask.size()[2:])[mskidx]
+            #logger.info(f'Out mask mean : {outmask.mean()}')
+            #logger.info(f'Out mask std : {outmask.std()}')
+            lossmsk = criterionmask(outmask, m)
             # Get loss
-            loss = criterion(out, y)
+            loss = 0.5 * losscls + 0.5 * lossmsk
             tr_loss += loss.item()
+            tr_losscls += losscls.item()
+            tr_lossmsk += lossmsk.item()
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
             if step % ACCUM == 0:
                 optimizer.step()
                 optimizer.zero_grad()
             if step%100==0:
-                logger.info('Trn step {} of {} trn lossavg {:.5f}'. \
-                        format(step, len(trnloader), (tr_loss/(1+step))))
+                logger.info('Trn step {} of {} trn lossavg {:.5f} losscls {:.5f} lossmsk {:.5f}'. \
+                        format(step, len(trnloader), (tr_loss/(1+step)), \
+                               (tr_losscls/(1+step)), (tr_lossmsk/(1+step)) ))
             del x, y, out, batch
         torch.save(model.state_dict(), model_file_name)
         scheduler.step()
     else:
-        model = SPPSeqNet(backbone=50, pool_size=poolsize, dense_units = 256, \
-                  architecture = options.arch, dropout = 0.2, embed_size = embedsize)
+        model = make_model()
         if n_gpu > 0:
             model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
         model.load_state_dict(torch.load(model_file_name))
@@ -453,28 +470,19 @@ for epoch in range(EPOCHS):
         with torch.no_grad():
             for step, batch in enumerate(valloader):
                 x = batch['frames'].to(device, dtype=torch.float)
-                out = model(x)
+                out = model(x)[0]
                 out = torch.sigmoid(out)
                 ypredval.append(out.cpu().detach().numpy())
                 valids.append(batch['ids'].cpu().detach().numpy())
                 if step%200==0:
                     logger.info('Val step {} of {}'.format(step, len(valloader)))    
-        # Extract prediction & ids
         ypredval = np.concatenate(ypredval).flatten()
         valids = np.concatenate(valids).flatten()
-        
-        logger.info('Aggregate validation')
-        yvaldf = valdataset.data.iloc[valids][['label', 'video']].copy()
-        yvaldf['pred'] = ypredval
-        yvaldf = yvaldf.groupby(['video'], as_index=False)[['label', 'pred']].mean()
-        yvaldf = yvaldf.sort_values('video').reset_index(drop=True)
-        
-        ypredval = yvaldf.pred.values
-        yactval = yvaldf.label.values
         ypredvalls.append(ypredval)
-        
+        yactval = valdataset.data.iloc[valids].label.values
         logger.info('Actuals {}'.format(yactval[:8]))
         logger.info('Preds {}'.format(ypredval[:8]))
+        logger.info('Ids {}'.format(valids[:8]))
         for c in [.1, .07, .05, .03, .01, .001] :
             valloss = log_loss(yactval, ypredval.clip(c,1-c))
             logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
@@ -484,8 +492,8 @@ for epoch in range(EPOCHS):
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
         logger.info('Write out bagged prediction to preds folder')
-        #yvaldf = valdataset.data.iloc[valids][['video', 'label']]
-        #yvaldf['pred'] = ypredval 
+        yvaldf = valdataset.data.iloc[valids][['video', 'label']]
+        yvaldf['pred'] = ypredval 
         yvaldf.to_csv('preds/dfake_{}_sub_epoch{}_fold{}.csv.gz'.format(options.arch, epoch, FOLD), \
             index = False, compression = 'gzip')
         del yactval, ypredval, valids

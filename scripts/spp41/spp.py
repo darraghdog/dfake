@@ -346,7 +346,7 @@ class DFakeDataset(Dataset):
                 # if its a FAKE use the pixel_change to work out how much of a fake it is
                 label= vid.label 
                 if label == 1:
-                    label = 0.6 + max(pixel_change/7.5, 0.4)
+                    label = 0.7 + max(pixel_change*0.1, 0.4)
                 labels = torch.tensor(label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    
             else:      

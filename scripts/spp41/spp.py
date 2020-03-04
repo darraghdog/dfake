@@ -301,16 +301,26 @@ class DFakeDataset(Dataset):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
+        mname = os.path.join(self.imgdir, 'map__' + vid.video.replace('mp4', 'npz'))
         try:
             fidx = self.track.loc[vid.video].loc[vid.obj]
             frames = np.load(fname)['arr_0'][fidx]
+            masks = np.load(mname)['arr_0'][fidx]
+            
             if (SKIP>1) and (frames.shape[0] > SKIP*6):
                 every_k = random.randint(0,SKIP-1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
+                masks  = np.stack([b for t,b in enumerate(masks) if t%SKIP==every_k])
+
             elif (SKIP>1) and (frames.shape[0] > (SKIP//2)*6):
                 every_k = random.randint(0,(SKIP//2)-1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%(SKIP//2)==every_k])
-
+                masks  = np.stack([b for t,b in enumerate(masks) if t%(SKIP//2)==every_k])
+            # Count pixel change
+            masks = (abs(masks.astype(np.int32) - 128)).sum(-1)#.astype(np.uint8)
+            masks = masks.clip(0, 255).astype(np.uint8)
+            masks[masks<10] = 0
+            pixel_change = np.log(1+ masks.mean((0,1,2)))
             # if it is a FAKE label in trainnig, 60% apply mixing of augmentations
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
@@ -333,7 +343,11 @@ class DFakeDataset(Dataset):
             frames = augmented['image']
             frames = frames.resize_(d0,d1,d2,d3)
             if self.train:
-                labels = torch.tensor(vid.label)
+                # if its a FAKE use the pixel_change to work out how much of a fake it is
+                label= vid.label 
+                if label == 1:
+                    label = 0.6 + max(pixel_change/7.5, 0.4)
+                labels = torch.tensor(label)
                 return {'frames': frames, 'idx': idx, 'labels': labels}    
             else:      
                 return {'frames': frames, 'idx': idx}
@@ -426,6 +440,7 @@ for epoch in range(EPOCHS):
             x = batch['frames'].to(device, dtype=torch.float)
             y = batch['labels'].to(device, dtype=torch.float)
             x = torch.autograd.Variable(x, requires_grad=True)
+            logger.info(y)
             y = torch.autograd.Variable(y)
             y = y.unsqueeze(1)
             out = model(x)

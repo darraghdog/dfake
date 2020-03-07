@@ -312,8 +312,8 @@ class DFakeDataset(Dataset):
             if (masks-128).sum((0,1,2,3)) != 0 :
                 # Mask Augment 66% of time
                 if random.choice(range(3))<2:
-                    # select a mask ratio between 0.4 and 1.5
-                    maskmult = random.uniform(0.5, 1.5)
+                    # select a mask ratio above 0.3 from a gaussian
+                    maskmult = max(0.3, random.gauss(0.8, 0.3))
                     frames = maskaug(frames, masks, maskmult=frames)
 
             if (SKIP>1) and (frames.shape[0] > SKIP*6):

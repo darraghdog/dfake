@@ -45,20 +45,21 @@ tsm07 - tune dropout
 
 Ideas 
 ========
-*** Error analysis on face size and error - and real vs fake
-*** Zero embeddings of blank image
 Inference - video start and end for batch size 1
-Use try and except for the gpu part of previous point
 More aug to Real images
 Add simple features paper
-Try zoom augmentation
-*** Resnet50 face tracker at inference
 ImgDiff model
 Add audio features
-Seresnext on TSM
-*** Start with more easier samples (larger faces) and gradually move to more difficult. 
-Add pose to the model - part of retinaface now
-Extract yaw, ptich; and choose frames which minimise this
+Mixnet/Efficientnet on TSM
 Add face box size to model
-Optical flow in TSM
-Center crop and random crop
+
+*** Start with more easier samples (larger faces) and gradually move to more difficult. 
+*** Add pose to the model - part of retinaface now
+*** Extract yaw, ptich; and choose frames which minimise this
+*** Optical flow in TSM
+*** Center crop and random crop
+*** Error analysis on face size and error - and real vs fake
+*** Zero embeddings of blank image
+*** Use try and except for the gpu part of previous point
+*** Try zoom augmentation
+*** Resnet50 face tracker at inference

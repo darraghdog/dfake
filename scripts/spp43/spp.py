@@ -308,8 +308,8 @@ class DFakeDataset(Dataset):
             frames = np.load(fname)['arr_0'][fidx]
             masks = np.load(mname)['arr_0'][fidx]
             
-            # Only if the mask changed 
-            if (masks-128).sum((0,1,2,3)) != 0 :
+            # Only if training and the mask changed 
+            if self.train and ((masks-128).sum((0,1,2,3)) != 0):
                 # Mask Augment 66% of time
                 if random.choice(range(3))<2:
                     # select a mask ratio above 0.3 from a gaussian

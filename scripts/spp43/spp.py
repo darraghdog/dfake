@@ -129,6 +129,27 @@ REALSAMP=int(options.realsamp)
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
+trackdf = pd.concat([pd.read_csv(f) for f in glob.glob(IMGDIR+'/track*')], 0)
+trackdf = trackdf.sort_values(['video', 'frame']).reset_index(drop = True)
+trackdf['seq'] = trackdf.groupby(['video']).cumcount()
+trackdf = trackdf[['video', 'obj', 'seq']]
+
+trackgrp = trackdf.groupby(['video', 'obj'], as_index=False).count()
+trackgrp = trackgrp.sort_values(['video', 'seq'], ascending = False)
+trackgrp['rank'] = trackgrp.groupby(['video']).cumcount()
+trackgrp = trackgrp.sort_index()
+# Exclude the following
+trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('seq<16 & rank >0').index)]
+trackgrp = trackgrp[~trackgrp.index.isin(trackgrp.query('seq<32 & rank >1').index)]
+trackgrp = trackgrp[['video', 'obj']].reset_index(drop=True)
+
+# Join to metadf
+metadf = pd.merge(metadf, trackgrp)
+trackdf = pd.merge(trackgrp, trackdf, how = 'left')
+trackdf = trackdf.groupby(['video', 'obj'])['seq'].apply(list)
+
+
+
 
 
 n_gpu = torch.cuda.device_count()
@@ -142,8 +163,8 @@ REAL_VIDEO_TO_CLUSTER, FAKE_VIDEO_TO_CLUSTER, CLUSTER_TO_REAL_VIDEOS, \
 ACTORS = [[i+'.mp4' for i in m] for m in CLUSTER_TO_REAL_VIDEOS.values()]
 REALVIDSAMEACTOR = dict(itertools.chain(*[[(im, m) for im in  m] \
                                            for m in ACTORS]))
-
 random.sample(REALVIDSAMEACTOR['eopcdsfkzm.mp4'], 3)
+
 # https://www.kaggle.com/bminixhofer/speed-up-your-rnn-with-sequence-bucketing
 class SPPSeqNet(nn.Module):
     def __init__(self, backbone, embed_size, pool_size=(1, 2, 6), pretrained=True, \
@@ -271,6 +292,7 @@ class DFakeDataset(Dataset):
         self.val = val
         self.norm = transform_norm
         self.transform = trn_transforms if not val else val_transforms
+        self.track = trackdf
   
     def __len__(self):
         return len(self.data)
@@ -279,52 +301,17 @@ class DFakeDataset(Dataset):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
-        frames = np.load(fname)['arr_0']
-        if (SKIP>1) and (frames.shape[0] > SKIP*6):
-            every_k = random.randint(0,SKIP-1)
-            frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
-        framesbackup = frames.copy()
         try:
-            # if it is a FAKE label in trainnig, 60% apply mixing of augmentations
-            if self.train:
-                try:
-                    # Get out a random sample of fake and real
-                    ascdf = self.data[ self.data.original == vid.original].reset_index()
-                    ascdf = ascdf[['video', 'original']].drop_duplicates().reset_index(drop=True)
-                    
-                    if vid.label==1:
-                        mixinfake = min(random.randint(0,FAKESAMP), ascdf.shape[0])
-                        mixinorig = min(random.randint(0,ORIGSAMP), ascdf.shape[0])
-                        mixinreal = min(random.randint(0,REALSAMP), ascdf.shape[0])
-                        ascls = [vid.video] + ascdf.sample(  mixinfake ).video.tolist() + \
-                                        random.sample(REALVIDSAMEACTOR[vid.video], mixinreal) # ascdf.original[: mixinorig  ].tolist()
+            fidx = self.track.loc[vid.video].loc[vid.obj]
+            frames = np.load(fname)['arr_0'][fidx]
+            if (SKIP>1) and (frames.shape[0] > SKIP*6):
+                every_k = random.randint(0,SKIP-1)
+                frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])
+            elif (SKIP>1) and (frames.shape[0] > (SKIP//2)*6):
+                every_k = random.randint(0,(SKIP//2)-1)
+                frames = np.stack([b for t,b in enumerate(frames) if t%(SKIP//2)==every_k])
 
-                    if vid.label==0:
-                        mixinreal = min(random.randint(0,REALSAMP), ascdf.shape[0])
-                        ascls = [vid.video] + random.sample(REALVIDSAMEACTOR[vid.video], mixinreal)
-                    # logger.info('{} : {}'.format(vid.label, ' '.join(ascls)  ) )    
-                    framesdict = dict((k, np.load(os.path.join(self.imgdir, \
-                                        k.replace('.mp4', '.npz')))['arr_0']) \
-                                        for k in set(ascls) )
-                    frames = []
-                    # Pick from a random video
-                    if (SKIP>1) and (framesdict[vid.video].shape[0] > SKIP*6):
-                        every_k = random.randint(0,SKIP-1)
-                        for t,b in enumerate(framesdict[vid.video]):
-                            if t%SKIP!=every_k:
-                                continue
-                            try:
-                                randsamp = random.choice(ascls)
-                                frames.append(framesdict[randsamp][t])
-                            except:
-                                frames.append(b)
-                        frames = np.stack(frames)
-                    else:
-                        frames = framesbackup.copy()
-                except:
-                    frames = framesbackup.copy()
-            else:
-                frames = framesbackup.copy()
+            # if it is a FAKE label in trainnig, 60% apply mixing of augmentations
             # Cut the frames to max 37 with a sliding window
             d0,d1,d2,d3 = frames.shape
             if self.train and (d0>self.maxlen):
@@ -476,13 +463,23 @@ for epoch in range(EPOCHS):
                 valids.append(batch['ids'].cpu().detach().numpy())
                 if step%200==0:
                     logger.info('Val step {} of {}'.format(step, len(valloader)))    
+
+        # Extract prediction & ids
         ypredval = np.concatenate(ypredval).flatten()
         valids = np.concatenate(valids).flatten()
+        
+        logger.info('Aggregate validation')
+        yvaldf = valdataset.data.iloc[valids][['label', 'video']].copy()
+        yvaldf['pred'] = ypredval
+        yvaldf = yvaldf.groupby(['video'], as_index=False)[['label', 'pred']].mean()
+        yvaldf = yvaldf.sort_values('video').reset_index(drop=True)
+        
+        ypredval = yvaldf.pred.values
+        yactval = yvaldf.label.values
         ypredvalls.append(ypredval)
-        yactval = valdataset.data.iloc[valids].label.values
+        
         logger.info('Actuals {}'.format(yactval[:8]))
         logger.info('Preds {}'.format(ypredval[:8]))
-        logger.info('Ids {}'.format(valids[:8]))
         for c in [.1, .07, .05, .03, .01, .001] :
             valloss = log_loss(yactval, ypredval.clip(c,1-c))
             logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
@@ -492,8 +489,10 @@ for epoch in range(EPOCHS):
             valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
             logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
         logger.info('Write out bagged prediction to preds folder')
-        yvaldf = valdataset.data.iloc[valids][['video', 'label']]
-        yvaldf['pred'] = ypredval 
+        #yvaldf = valdataset.data.iloc[valids][['video', 'label']]
+        #yvaldf['pred'] = ypredval 
         yvaldf.to_csv('preds/dfake_{}_sub_epoch{}_fold{}.csv.gz'.format(options.arch, epoch, FOLD), \
             index = False, compression = 'gzip')
         del yactval, ypredval, valids
+
+

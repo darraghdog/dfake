@@ -34,7 +34,7 @@ spp37 - Frame diff
 spp38 - Efficientnet b1 ns - 5 fold
 spp39 - Copy spp32 and learn on objects
 spp40 - Copy spp38 and learn on objects
-
+spp43 - augment with orig fake diff (Copy spp40)
 
 tsm01 - TSM Base and with LSTM at end
 tsm02 - TSM Base parallelised
@@ -42,6 +42,8 @@ tsm03 - TSM on SeResNext
 tsm04 - TSM Base, blockres fold_div 4
 tsm06 - Take 2 FPS
 tsm07 - tune dropout
+tsm08 - 2 FPS @ Effnet
+
 
 Ideas 
 ========

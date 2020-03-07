@@ -122,6 +122,7 @@ ACCUM=int(options.accum)
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
 logger.info('Full video file shape {} {}'.format(*metadf.shape))
+'''
 trackdf = pd.concat([pd.read_csv(f) for f in glob.glob(IMGDIR+'/track*')], 0)
 trackdf = trackdf.sort_values(['video', 'frame']).reset_index(drop = True)
 trackdf['seq'] = trackdf.groupby(['video']).cumcount()
@@ -140,10 +141,7 @@ trackgrp = trackgrp[['video', 'obj']].reset_index(drop=True)
 metadf = pd.merge(metadf, trackgrp)
 trackdf = pd.merge(trackgrp, trackdf, how = 'left')
 trackdf = trackdf.groupby(['video', 'obj'])['seq'].apply(list)
-
-
-
-
+'''
 
 n_gpu = torch.cuda.device_count()
 logger.info('Cuda n_gpus : {}'.format(n_gpu ))
@@ -206,10 +204,11 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the overall encoding quality.
 '''
 
-def maskaug(fake, mask, maskmult = 1.0):
+def maskaug(fake, masks, maskmult = 1.0):
     # reverse original mask to jpg function
     mask = (masks.astype(np.int32)-128)*2
-    fakeaug = frames.astype(np.int32) + (mask * (1.0- maskmult))
+    fakeaug = fake.astype(np.int32) + (mask * (1.0- maskmult))
+    fakeaug = np.rint(fakeaug)
     fakeaug = fakeaug.clip(0, 255).astype(np.uint8)
     return fakeaug
 
@@ -277,6 +276,7 @@ class DFakeDataset(Dataset):
     def __init__(self, df, imgdir, framels, aug_ratio = 5, train = False, val = False, labels = False, maxlen = 32 // SKIP):
         self.data = df.copy()
         self.data.label = (self.data.label == 'FAKE').astype(np.int8)
+        logger.info( self.data[['label']].head() )
         self.imgdir = imgdir
         self.framels = framels # os.listdir(imgdir)
         self.labels = labels
@@ -284,6 +284,7 @@ class DFakeDataset(Dataset):
         self.data = pd.concat([self.data.query('label == 0')]*5+\
                                [self.data.query('label == 1')])
         self.data = self.data.sample(frac=1).reset_index(drop=True)
+        logger.info( self.data[['label']].head() )
         # self.data = pd.concat([ self.data[self.data.video.str.contains('qirlrtrxba')],  self.data[:500].copy() ]).reset_index(drop=True)
         self.maxlen = maxlen
         logger.info('Expand the REAL class {} {}'.format(*self.data.shape))
@@ -292,7 +293,7 @@ class DFakeDataset(Dataset):
         self.val = val
         self.norm = transform_norm
         self.transform = trn_transforms if not val else val_transforms
-        self.track = trackdf
+        #self.track = trackdf
   
     def __len__(self):
         return len(self.data)
@@ -304,9 +305,9 @@ class DFakeDataset(Dataset):
         mname = os.path.join(self.imgdir, 'map__' + vid.video.replace('mp4', 'npz'))
         
         try:
-            fidx = self.track.loc[vid.video].loc[vid.obj]
-            frames = np.load(fname)['arr_0'][fidx]
-            masks = np.load(mname)['arr_0'][fidx]
+            #fidx = self.track.loc[vid.video].loc[vid.obj]
+            frames = np.load(fname)['arr_0']#[fidx]
+            masks = np.load(mname)['arr_0']#[fidx]
             
             # Only if training and the mask changed 
             if self.train and ((masks-128).sum((0,1,2,3)) != 0):
@@ -314,7 +315,7 @@ class DFakeDataset(Dataset):
                 if random.choice(range(3))<2:
                     # select a mask ratio above 0.3 from a gaussian
                     maskmult = max(0.3, random.gauss(0.8, 0.3))
-                    frames = maskaug(frames, masks, maskmult=frames)
+                    frames = maskaug(frames, masks, maskmult=maskmult)
 
             if (SKIP>1) and (frames.shape[0] > SKIP*6):
                 every_k = random.randint(0,SKIP-1)
@@ -383,8 +384,8 @@ valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 FRAMELS = pd.read_csv(os.path.join(IMGDIR, '../cropped_faces15.txt'), header=None).iloc[:,0].tolist()
 trndataset = DFakeDataset(trndf, IMGDIR, FRAMELS, train = True, val = False, labels = True, maxlen = 48 // SKIP)
 valdataset = DFakeDataset(valdf, IMGDIR, FRAMELS, train = False, val = True, labels = False, maxlen = 48 // SKIP)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
+trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=32, collate_fn=collatefn)
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=32, collate_fn=collatefn)
 
 logger.info('Create model')
 poolsize=(1, 2) # , 6)

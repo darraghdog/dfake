@@ -73,9 +73,6 @@ parser.add_option('-r', '--accum', action="store", dest="accum", help="accumulat
 parser.add_option('-s', '--skip', action="store", dest="skip", help="Skip every k frames", default="1")
 parser.add_option('-t', '--arch', action="store", dest="arch", help="Architecture", default="mixnet_l")
 parser.add_option('-u', '--stop', action="store", dest="stop", help="Start epochs", default="13")
-parser.add_option('-v', '--fakesamp', action="store", dest="fakesamp", help="Mix in ratio of fake samples", default="0")
-parser.add_option('-w', '--origsamp', action="store", dest="origsamp", help="Max mix in ratio of original", default="0")
-parser.add_option('-x', '--realsamp', action="store", dest="realsamp", help="Max mix in ratio of other reals", default="0")
 
 
 options, args = parser.parse_args()
@@ -121,10 +118,6 @@ LRGAMMA=float(options.lrgamma)
 DECAY=float(options.decay)
 INFER=options.infer
 ACCUM=int(options.accum)
-ORIGSAMP=int(options.origsamp)
-FAKESAMP=int(options.fakesamp)
-REALSAMP=int(options.realsamp)
-
 
 # METAFILE='/Users/dhanley2/Documents/Personal/dfake/data/trainmeta.csv.gz'
 metadf = pd.read_csv(METAFILE)
@@ -212,6 +205,13 @@ In this dataset, no video was subjected to more than one augmentation.
 - reduce the resolution of the video to 1/4 of its original size
 - reduce the overall encoding quality.
 '''
+
+def maskaug(fake, mask, maskmult = 1.0):
+    # reverse original mask to jpg function
+    mask = (masks.astype(np.int32)-128)*2
+    fakeaug = frames.astype(np.int32) + (mask * (1.0- maskmult))
+    fakeaug = fakeaug.clip(0, 255).astype(np.uint8)
+    return fakeaug
 
 def snglaugfn():
     rot = random.randrange(-10, 10)
@@ -301,9 +301,21 @@ class DFakeDataset(Dataset):
         vid = self.data.loc[idx]
         # Apply constant augmentation on combined frames
         fname = os.path.join(self.imgdir, vid.video.replace('mp4', 'npz'))
+        mname = os.path.join(self.imgdir, 'map__' + vid.video.replace('mp4', 'npz'))
+        
         try:
             fidx = self.track.loc[vid.video].loc[vid.obj]
             frames = np.load(fname)['arr_0'][fidx]
+            masks = np.load(mname)['arr_0'][fidx]
+            
+            # Only if the mask changed 
+            if (masks-128).sum((0,1,2,3)) != 0 :
+                # Mask Augment 66% of time
+                if random.choice(range(3))<2:
+                    # select a mask ratio between 0.4 and 1.5
+                    maskmult = random.uniform(0.5, 1.5)
+                    frames = maskaug(frames, masks, maskmult=frames)
+
             if (SKIP>1) and (frames.shape[0] > SKIP*6):
                 every_k = random.randint(0,SKIP-1)
                 frames = np.stack([b for t,b in enumerate(frames) if t%SKIP==every_k])

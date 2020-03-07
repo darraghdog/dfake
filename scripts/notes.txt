@@ -33,6 +33,8 @@ spp36 - Efficientnet b2 ns - 5 fold
 spp37 - Frame diff
 spp38 - Efficientnet b1 ns - 5 fold
 spp39 - Copy spp32 and learn on objects
+spp40 - Copy spp38 and learn on objects
+
 
 tsm01 - TSM Base and with LSTM at end
 tsm02 - TSM Base parallelised

@@ -8,8 +8,17 @@ RUN pip install facenet-pytorch
 RUN pip install torch-mtcnn
 RUN pip install pretrainedmodels==0.7.4
 RUN git clone https://github.com/rwightman/pytorch-image-models.git && cd pytorch-image-models && python setup.py install && cd ..
-RUN pip install git+https://github.com/qubvel/segmentation_models.pytorch
-RUN git clone https://github.com/NVIDIA/apex && \
-    cd apex && \
-    pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./ && \
-    cd ..
+#RUN pip install git+https://github.com/qubvel/segmentation_models.pytorch
+#RUN git clone https://github.com/NVIDIA/apex && \
+#    cd apex && \
+#    pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./ && \
+#    cd ..
+RUN pip install catalyst alchemy-catalyst adabound pytorch_toolbelt adamod imgaug 
+RUN pip install -U git+git://github.com/lilohuang/PyTurboJPEG.git
+RUN pip install hydra-core --upgrade
+RUN pip install kornia
+RUN pip install git+https://github.com/PytorchLightning/pytorch-lightning.git@64de57b09e5a5fd37a618e93a3f69ef48ff758a5 --upgrade
+COPY deepfake-0.5.0-py3-none-any.whl .
+RUN pip install deepfake-0.5.0-py3-none-any.whl 
+RUN pip install albumentations==0.4.5
+RUN pip install imgaug==0.4.0

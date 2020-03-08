@@ -29,6 +29,12 @@ spp32 - Mixnet xl low aug, no other frames, 5 fold
 spp33 - Efficientnet b1 & b2 ns; copy from spp32
 spp34 - Efficientnet b1 ns; test best combination of other frames
 spp35 - Efficientnet b2 ns - 5 fold
+spp36 - Efficientnet b2 ns - 5 fold
+spp37 - Frame diff
+spp38 - Efficientnet b1 ns - 5 fold
+spp39 - Copy spp32 and learn on objects
+spp40 - Copy spp38 and learn on objects
+spp43 - augment with orig fake diff (Copy spp40)
 
 tsm01 - TSM Base and with LSTM at end
 tsm02 - TSM Base parallelised
@@ -36,23 +42,26 @@ tsm03 - TSM on SeResNext
 tsm04 - TSM Base, blockres fold_div 4
 tsm06 - Take 2 FPS
 tsm07 - tune dropout
+tsm08 - 2 FPS @ Effnet
+
 
 Ideas 
 ========
-*** Error analysis on face size and error - and real vs fake
-*** Zero embeddings of blank image
 Inference - video start and end for batch size 1
-Use try and except for the gpu part of previous point
 More aug to Real images
 Add simple features paper
-Try zoom augmentation
-*** Resnet50 face tracker at inference
 ImgDiff model
 Add audio features
-Seresnext on TSM
-*** Start with more easier samples (larger faces) and gradually move to more difficult. 
-Add pose to the model - part of retinaface now
-Extract yaw, ptich; and choose frames which minimise this
+Mixnet/Efficientnet on TSM
 Add face box size to model
-Optical flow in TSM
-Center crop and random crop
+
+*** Start with more easier samples (larger faces) and gradually move to more difficult. 
+*** Add pose to the model - part of retinaface now
+*** Extract yaw, ptich; and choose frames which minimise this
+*** Optical flow in TSM
+*** Center crop and random crop
+*** Error analysis on face size and error - and real vs fake
+*** Zero embeddings of blank image
+*** Use try and except for the gpu part of previous point
+*** Try zoom augmentation
+*** Resnet50 face tracker at inference

@@ -261,7 +261,7 @@ class DFakeDataset(Dataset):
         self.data = self.data[self.data.video.str.replace('.mp4', '.npz').isin(self.framels)]
         self.data = pd.concat([self.data.query('label == 0')]*5+\
                                [self.data.query('label == 1')])
-        self.data = self.data.sample(frac=1).reset_index(drop=True)
+        self.data = self.data.sample(frac=1).reset_index(drop=True).head(20)
         # self.data = pd.concat([ self.data[self.data.video.str.contains('qirlrtrxba')],  self.data[:500].copy() ]).reset_index(drop=True)
         self.maxlen = maxlen
         logger.info('Expand the REAL class {} {}'.format(*self.data.shape))
@@ -282,6 +282,7 @@ class DFakeDataset(Dataset):
         try:
             frames = np.load(fname)['arr_0']
             masks = np.load(mname)['arr_0']
+            logger.info(f'1. {vid.video} Mask mean/std {masks.mean():.5f}/{masks.std():.5f}')
             # shp1 = frames.shape
             if (SKIP>1) and (frames.shape[0] > SKIP*6):
                 every_k = random.randint(0,SKIP-1)
@@ -297,19 +298,26 @@ class DFakeDataset(Dataset):
             else:
                 frames = frames[:self.maxlen]
                 masks = masks[:self.maxlen]
+            logger.info(f'2. {vid.video} Mask mean/std {masks.mean():.5f}/{masks.std():.5f}')
+
             d0,d1,d2,d3 = frames.shape
             # Standard augmentation on each image
             augfn = self.snglaug()
             if self.train : 
                 frames = np.stack([augfn(image=f)['image'] for f in frames])
                 masks = np.stack([augfn(image=f)['image'] for f in masks])
+            logger.info(f'3. {vid.video} Mask mean/std {masks.mean():.5f}/{masks.std():.5f} {type(masks)}')
             frames = frames.reshape(d0*d1, d2, d3)
             if self.train or self.val:
                 frames = self.transform(image=frames)['image'] 
             frames = self.norm(image=frames)['image']
             frames = frames.resize_(d0,d1,d2,d3)
             masks = maskit(masks)
+            logger.info(f'4. {vid.video} Mask mean/std {masks.mean():.5f}/{masks.std():.5f} {type(masks)}')
+
             masks = torch.tensor(np.float32(masks)).unsqueeze(1) / 255
+            logger.info(f'5. {vid.video} Mask mean/std {masks.mean():.5f}/{masks.std():.5f} {type(masks)}')
+
             if self.train:
                 labels = torch.tensor(vid.label)
                 return {'frames': frames, 'idx': idx, 'masks': masks, 'labels': labels}    
@@ -358,8 +366,8 @@ valdf = metadf.query('fold == @FOLD').reset_index(drop=True)
 
 trndataset = DFakeDataset(trndf, IMGDIR, train = True, val = False, labels = True, maxlen = 48 // SKIP)
 valdataset = DFakeDataset(valdf, IMGDIR, train = False, val = True, labels = False, maxlen = 48 // SKIP)
-trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=16, collate_fn=collatefn)
-valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=16, collate_fn=collatefn)
+trnloader = DataLoader(trndataset, batch_size=BATCHSIZE, shuffle=True, num_workers=0, collate_fn=collatefn)
+valloader = DataLoader(valdataset, batch_size=BATCHSIZE*2, shuffle=False, num_workers=0, collate_fn=collatefn)
 
 logger.info('Create model')
 aux_params=dict(
@@ -385,7 +393,7 @@ scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
 model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 criterion = torch.nn.BCEWithLogitsLoss()
 criterionmask = torch.nn.L1Loss()
-#criterionmask = torch.nn.MSELoss()
+criterionmask = torch.nn.MSELoss()
 
 
 if n_gpu > 0:
@@ -431,13 +439,13 @@ for epoch in range(EPOCHS):
             # Get loss for video classes
             losscls = criterion(out, y)
             # Get loss for frame segmentation
-            #logger.info(f'Mask mean : {m.mean()}')
-            #logger.info(f'Mask std : {m.std()}')
+            logger.info(f'Mask mean : {m.mean()}')
+            logger.info(f'Mask std : {m.std()}')
             mskidx = msk.view(-1)==1
             m = m.view(-1,  *m.size()[2:])[mskidx]
             outmask = outmask.view(-1, *outmask.size()[2:])[mskidx]
-            #logger.info(f'Out mask mean : {outmask.mean()}')
-            #logger.info(f'Out mask std : {outmask.std()}')
+            logger.info(f'Out mask mean : {outmask.mean()}')
+            logger.info(f'Out mask std : {outmask.std()}')
             lossmsk = criterionmask(outmask, m)
             # Get loss
             loss = 0.5 * losscls + 0.5 * lossmsk
@@ -456,43 +464,3 @@ for epoch in range(EPOCHS):
             del x, y, out, batch
         torch.save(model.state_dict(), model_file_name)
         scheduler.step()
-    else:
-        model = make_model()
-        if n_gpu > 0:
-            model = torch.nn.DataParallel(model, device_ids=list(range(n_gpu)))
-        model.load_state_dict(torch.load(model_file_name))
-        model.to(device)
-    if INFER in ['VAL', 'TRN']:
-        model.eval()
-        ypredval = []
-        valids = [] 
-        with torch.no_grad():
-            for step, batch in enumerate(valloader):
-                x = batch['frames'].to(device, dtype=torch.float)
-                out = model(x)[0]
-                out = torch.sigmoid(out)
-                ypredval.append(out.cpu().detach().numpy())
-                valids.append(batch['ids'].cpu().detach().numpy())
-                if step%200==0:
-                    logger.info('Val step {} of {}'.format(step, len(valloader)))    
-        ypredval = np.concatenate(ypredval).flatten()
-        valids = np.concatenate(valids).flatten()
-        ypredvalls.append(ypredval)
-        yactval = valdataset.data.iloc[valids].label.values
-        logger.info('Actuals {}'.format(yactval[:8]))
-        logger.info('Preds {}'.format(ypredval[:8]))
-        logger.info('Ids {}'.format(valids[:8]))
-        for c in [.1, .07, .05, .03, .01, .001] :
-            valloss = log_loss(yactval, ypredval.clip(c,1-c))
-            logger.info('Epoch {} val single; clip {:.3f} logloss {:.5f}'.format(epoch,c, valloss))
-        for c in [.1, .07, .05, .03, .01, .001] :
-            BAGS=3
-            ypredvalbag = sum(ypredvalls[-BAGS:])/len(ypredvalls[-BAGS:])
-            valloss = log_loss(yactval, ypredvalbag.clip(c,1-c))
-            logger.info('Epoch {} val bags {}; clip {:.3f} logloss {:.5f}'.format(epoch, len(ypredvalls[:BAGS]), c, valloss))
-        logger.info('Write out bagged prediction to preds folder')
-        yvaldf = valdataset.data.iloc[valids][['video', 'label']]
-        yvaldf['pred'] = ypredval 
-        yvaldf.to_csv('preds/dfake_{}_sub_epoch{}_fold{}.csv.gz'.format(options.arch, epoch, FOLD), \
-            index = False, compression = 'gzip')
-        del yactval, ypredval, valids

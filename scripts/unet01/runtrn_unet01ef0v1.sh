@@ -3,8 +3,8 @@ WDIR='unet01'
 FOLD=0
 SIZE='224'
 ACCUM=1
-BSIZE=16
-LR=0.00005
+BSIZE=24
+LR=0.0005
 
 for FOLD in 0 # 1 2 
 do
@@ -13,5 +13,5 @@ do
             "cd /share/dhanley2/dfake/scripts/$WDIR && python3 unet.py  \
             --wtspath weights  --fold $FOLD  --rootpath /share/dhanley2/dfake/ --metafile trainmeta.csv.gz  \
             --accum $ACCUM --imgpath data/mount/npimg15 --size $SIZE --batchsize $BSIZE --lr $LR \
-            --arch 'efficientnet-b1' --skip 8 --start 0 --epochs 20"
+            --arch 'efficientnet-b0' --skip 6 --start 1 --epochs 20"
 done

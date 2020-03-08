@@ -104,13 +104,12 @@ logger.info('Fold {} video file shape {} {}'.format(FOLD, *metadf.shape))
 VIDFILES = metadf.video_path.tolist()
 ORIGFILES = list(set(metadf.original_path.tolist()))
 
-#logger.info( metadf[['video_path', 'original_path']].drop_duplicates().head()  )
 vdict = collections.defaultdict(list)
 for t, row in metadf[['video_path', 'original_path']].drop_duplicates().iterrows():
     vid, orig = row
     if vid!=orig:
         vdict[orig].append(vid)
-#logger.info(dict(list(vdict.items())[0:2]))
+
 
 '''
 trknms = glob.glob('/Users/dhanley2/Documents/Personal/dfake/data/npimg08/track*.txt')
@@ -238,6 +237,8 @@ counter = 0
 def diffmap(origmat, fakemat):
     return (128 + 0.5*(origmat.astype(np.int16)-fakemat.astype(np.int16) )).astype(np.uint8)
 
+def diffmap(origmat, fakemat):
+    return (origmat.astype(np.int16)-fakemat.astype(np.int16)+255).astype(np.uint8)
 
 '''
 tmpls = glob.glob('/Users/dhanley2/Documents/Personal/dfake/data/bm*')
@@ -286,7 +287,6 @@ for tt, VNAME in enumerate(ORIGFILES):
         #logger.info(trackvid.iloc[0])
         
         logger.info('Write orig : {}'.format(VNAME))
-        logger.info(vdict[VNAME])
         oimgdict = collections.OrderedDict((o, []) for o in range(1+trackvid.obj.max()))         
         for (t, row) in trackvid.iterrows():
             obj = row.obj
@@ -298,7 +298,7 @@ for tt, VNAME in enumerate(ORIGFILES):
         omaptrack = diffmap(otrackfaces, otrackfaces)
         np.savez_compressed(os.path.join(OUTDIR, VNAME.split('/')[-1].replace('mp4', 'npz')), otrackfaces)
         np.savez_compressed(os.path.join(OUTDIR, 'map__'+VNAME.split('/')[-1].replace('mp4', 'npz')), omaptrack)
-         
+
         for FAKENAME in vdict[VNAME]:
             logger.info('Write fake : {}'.format(FAKENAME))
             imgls = vid2imgls(FAKENAME, FPS, MAXLOADSECONDS)[0]
@@ -312,7 +312,7 @@ for tt, VNAME in enumerate(ORIGFILES):
             ftrackfaces = np.array(sum(list(fimgdict.values()), []))
             fmaptrack = diffmap(otrackfaces, ftrackfaces)
             np.savez_compressed(os.path.join(OUTDIR, FAKENAME.split('/')[-1].replace('mp4', 'npz')), ftrackfaces)
-            np.savez_compressed(os.path.join(OUTDIR, 'map__'+FAKENAME.split('/')[-1].replace('mp4', 'npz')), fmaptrack)
+            np.savez_compressed(os.path.join(OUTDIR, 'map__'+FAKENAME.split('/')[-1].replace('mp4', 'npz')), fmapfaces)
             
         trackvid = trackvid.sort_values(['obj', 'frame'], 0).reset_index(drop=True)
         N_OBJ, N_FACES = len(trackvid.obj.unique()), len(trackvid)

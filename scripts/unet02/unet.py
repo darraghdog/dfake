@@ -308,7 +308,8 @@ class DFakeDataset(Dataset):
                 frames = self.transform(image=frames)['image'] 
             frames = self.norm(image=frames)['image']
             frames = frames.resize_(d0,d1,d2,d3)
-            masks = maskit(masks)
+            # masks = maskit(masks)
+            masks = makegray(masks)
             masks = torch.tensor(np.float32(masks)).unsqueeze(1) / 255
             if self.train:
                 labels = torch.tensor(vid.label)

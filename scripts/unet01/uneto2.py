@@ -382,7 +382,7 @@ plist = [
     ]
 optimizer = optim.Adam(plist, lr=LR)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS)
-model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
+model, optimizer = amp.initialize(model, optimizer, opt_level="O2")
 criterion = torch.nn.BCEWithLogitsLoss()
 criterionmask = torch.nn.L1Loss()
 #criterionmask = torch.nn.MSELoss()
@@ -396,7 +396,7 @@ for epoch in range(EPOCHS):
     LRate = scheduler.get_lr()[0]
     logger.info('Epoch {}/{} LR {:.9f}'.format(epoch, EPOCHS - 1, LRate))
     logger.info('-' * 10)
-    model_file_name = 'weights/sppnet_{}_epoch{}_lr{}_accum{}_fold{}.bin'.format(options.arch, epoch, LR, ACCUM, FOLD)
+    model_file_name = 'weights/sppneto2_{}_epoch{}_lr{}_accum{}_fold{}.bin'.format(options.arch, epoch, LR, ACCUM, FOLD)
     if epoch > int(options.stop):
         continue
     if epoch<START:

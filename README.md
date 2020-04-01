@@ -2,6 +2,8 @@
 
 ### Validation and Leaderboard Progress 
 
+... and. I stopped tracking here at `0.33915` :(
+
 | Model (`.scripts/` folder) |Image Size|Epochs|Bag|TTA |Fold|Val     |LB    |Comment                          |
 | ---------------|----------|------|---|----|----|--------|------|---------------------------------|
 | 2XSPPSeresnext50; 2XTSM Resnet50 | 224       |16,17; 4,5     |1 | Hflip |0  | 0.168, 0.163; 0.158, 0.196  | 0.33915 | Cosine restart at 10; ratio clip; BSize 4; `spp15` single lstm 256 HU `tsm01` TSM with avg consesnus | 

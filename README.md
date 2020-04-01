@@ -2,7 +2,7 @@
 
 ### Validation and Leaderboard Progress 
 
-... and. I stopped tracking here at `0.33915` :(
+... and I stopped tracking scores here at `0.33915` :(
 
 | Model (`.scripts/` folder) |Image Size|Epochs|Bag|TTA |Fold|Val     |LB    |Comment                          |
 | ---------------|----------|------|---|----|----|--------|------|---------------------------------|

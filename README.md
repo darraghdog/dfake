@@ -2,7 +2,7 @@
 
 ### Validation and Leaderboard Progress 
 
-... and I stopped tracking scores here at `0.33915` :(
+... and I stopped tracking scores here at `0.33915` :( but best public LB score in the repo is `0.270`
 
 | Model (`.scripts/` folder) |Image Size|Epochs|Bag|TTA |Fold|Val     |LB    |Comment                          |
 | ---------------|----------|------|---|----|----|--------|------|---------------------------------|
